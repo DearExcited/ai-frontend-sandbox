@@ -360,7 +360,11 @@ function computeLineLevelDiff(
 
     console.log('Replace - diffRange:', diffRange);
     console.log('Replace - modifiedCode:', modifiedCode.value);
+    console.log("readOnly?", editor.getOption(monaco.editor.EditorOption.readOnly));
 
+     // 关闭只读
+    editor.updateOptions({ readOnly: false });
+    
     // 用修改后的代码替换diff文本
     editor.executeEdits('replace-with-modified', [{
       range: diffRange,
@@ -370,9 +374,6 @@ function computeLineLevelDiff(
 
     // 清除 diff 装饰
     diffDecorations.value = editor.deltaDecorations(diffDecorations.value, []);
-
-    // 关闭只读
-    editor.updateOptions({ readOnly: false });
 
     // 退出 diff 模式
     isDiffMode.value = false;
