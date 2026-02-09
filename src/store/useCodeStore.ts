@@ -47,6 +47,6 @@ export const useCodeStore = defineStore('codeStore', {
       
       const selectedText = editor.getModel()!.getValueInRange(selection);
       return selectedText;
-    }
+    },
   }
 })

@@ -25,6 +25,7 @@ export const useDiffStore = defineStore('diffStore', () => {
     // 响应式状态
     const originalCode = ref('');
     const modifiedCode = ref('');
+    const modifiedCodeRaw = ref('');
     const currentSelection = ref<monaco.Selection | null>(null);
     const isDiffMode = ref(false);
     const diffResult = ref<DiffResult>({ lines: [], stats: { added: 0, removed: 0 } });
@@ -75,7 +76,7 @@ function computeLineLevelDiff(
       lines.push({
         lineNumber: lineNumber++,
         type: 'unchanged',
-        content: modifiedLine as string
+        content: originalLine as string
       });
       i++;
       j++;
@@ -133,6 +134,51 @@ function computeLineLevelDiff(
     }
   }
 
+    function getIndent(s: string) {
+    const m = s.match(/^\s*/);
+    return m ? m[0] : '';
+  }
+
+  function applyIndent(baseIndent: string, line: string) {
+    // 去掉原来的缩进，再加上基准缩进
+    return baseIndent + line.replace(/^\s*/, '');
+  }
+
+  function unifyAddedIndent(lines: DiffLine[]) {
+    // 预先缓存每行的“基准缩进”（来自 unchanged/removed）
+    const baseIndentAt: string[] = new Array(lines.length).fill('');
+
+    // forward：用最近的 baseline 缩进向后传播
+    let lastBase = '';
+    for (let idx = 0; idx < lines.length; idx++) {
+      const t = lines[idx].type;
+      if (t === 'unchanged' || t === 'removed') {
+        lastBase = getIndent(lines[idx].content);
+      }
+      baseIndentAt[idx] = lastBase;
+    }
+
+    // backward：补齐那些前面没有 baseline 的 added（开头新增的情况）
+    let nextBase = '';
+    for (let idx = lines.length - 1; idx >= 0; idx--) {
+      const t = lines[idx].type;
+      if (t === 'unchanged' || t === 'removed') {
+        nextBase = getIndent(lines[idx].content);
+      }
+      if (!baseIndentAt[idx]) baseIndentAt[idx] = nextBase;
+    }
+
+    // 最后：只改 added 行
+    for (let idx = 0; idx < lines.length; idx++) {
+      if (lines[idx].type === 'added') {
+        const baseIndent = baseIndentAt[idx] || '';
+        lines[idx].content = applyIndent(baseIndent, lines[idx].content);
+      }
+    }
+  }
+
+  unifyAddedIndent(lines);
+
   return { lines, stats };
 }
   
@@ -148,42 +194,6 @@ function computeLineLevelDiff(
     }
 
     return formattedLines.join('\n');
-  }
-  
-  // 获取Diff装饰器（用于在编辑器中高亮显示）
-  function getDiffDecorations(diffResult: DiffResult, _editor: any): any[] {
-    const { lines } = diffResult;
-    const decorations: any[] = [];
-
-    for (const line of lines) {
-      // 使用 line.lineNumber 而不是循环计数器
-      const range = new monaco.Range(line.lineNumber, 1, line.lineNumber, 1);
-
-      switch (line.type) {
-        case 'added':
-          decorations.push({
-            range: range,
-            options: {
-              isWholeLine: true,
-              className: 'diff-line-added',
-              linesDecorationsClassName: 'diff-gutter-added'
-            }
-          });
-          break;
-        case 'removed':
-          decorations.push({
-            range: range,
-            options: {
-              isWholeLine: true,
-              className: 'diff-line-removed',
-              linesDecorationsClassName: 'diff-gutter-removed'
-            }
-          });
-          break;
-      }
-    }
-
-    return decorations;
   }
   
   // 应用Diff装饰到编辑器（指定起始行号）
@@ -231,6 +241,7 @@ function computeLineLevelDiff(
     // 保存原始代码和修改后的代码
     originalCode.value = originalText;
     modifiedCode.value = modifiedText;
+    modifiedCodeRaw.value = modifiedText;
 
     // 获取当前选中的范围
     const selection = editor.getSelection();
@@ -337,20 +348,14 @@ function computeLineLevelDiff(
     const model = editor.getModel();
     if (!model) return;
 
-    // 计算当前diff文本占用的行数
+    // ---- 1) 计算 diffRange（你原来的逻辑保留） ----
     const diffResult = computeLineLevelDiff(originalCode.value, modifiedCode.value);
     const diffLineCount = diffResult.lines.length;
 
-    // 计算diff文本的结束行号
     const endLine = selectionStartLine.value + diffLineCount - 1;
-
-    // 确保结束行号不超过文档总行数
     const actualEndLine = Math.min(endLine, model.getLineCount());
-
-    // 获取结束行的最大列号
     const endColumn = model.getLineMaxColumn(actualEndLine);
 
-    // 计算diff文本的范围
     const diffRange = new monaco.Range(
       selectionStartLine.value,
       1,
@@ -358,24 +363,47 @@ function computeLineLevelDiff(
       endColumn
     );
 
+    function getIndentOfLine(lineNumber: number) {
+      const line = model!.getLineContent(lineNumber);
+      const m = line.match(/^\s*/);
+      return m ? m[0] : '';
+    }
+
+    function stripCommonIndent(code: string) {
+      const lines = code.replace(/\r\n/g, '\n').split('\n');
+      const nonEmpty = lines.filter(l => l.trim().length > 0);
+      if (nonEmpty.length === 0) return code;
+
+      const minIndent = Math.min(...nonEmpty.map(l => (l.match(/^\s*/)?.[0].length ?? 0)));
+      return lines
+        .map(l => (l.trim().length === 0 ? l : l.slice(minIndent)))
+        .join('\n');
+    }
+
+    function indentBlock(code: string, baseIndent: string) {
+      const lines = code.replace(/\r\n/g, '\n').split('\n');
+      return lines
+        .map(l => (l.trim().length === 0 ? l : baseIndent + l))
+        .join('\n');
+    }
+
+    const baseIndent = getIndentOfLine(selectionStartLine.value);
+    const modifiedIndented = indentBlock(stripCommonIndent(modifiedCodeRaw.value), baseIndent);
+
     console.log('Replace - diffRange:', diffRange);
-    console.log('Replace - modifiedCode:', modifiedCode.value);
+    console.log('Replace - modifiedIndented first line:', JSON.stringify(modifiedIndented.split('\n')[0]));
     console.log("readOnly?", editor.getOption(monaco.editor.EditorOption.readOnly));
 
-     // 关闭只读
+    // ---- 3) 执行替换 ----
     editor.updateOptions({ readOnly: false });
-    
-    // 用修改后的代码替换diff文本
+
     editor.executeEdits('replace-with-modified', [{
       range: diffRange,
-      text: modifiedCode.value,
+      text: modifiedIndented,
       forceMoveMarkers: true
     }]);
 
-    // 清除 diff 装饰
     diffDecorations.value = editor.deltaDecorations(diffDecorations.value, []);
-
-    // 退出 diff 模式
     isDiffMode.value = false;
     currentSelection.value = null;
   }

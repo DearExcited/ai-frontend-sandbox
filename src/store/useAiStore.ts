@@ -5,6 +5,7 @@ import { languages } from 'monaco-editor'
 import * as monaco from 'monaco-editor'
 import { debounceAsync } from "../utils/debounce";
 import { useDiffStore } from "./useDiffStore";
+import { useCodeStore } from "./useCodeStore";
 
 export const useAiStore = defineStore('useAiStore', () => {
   const isEnabled     = ref(false)
