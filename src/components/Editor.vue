@@ -355,6 +355,37 @@
     display: none;
   }
 
+  /* webkit滚动条样式要写三件套 */
+  .ai-agent .talk-content,
+  .ai-edit .talk-content{
+    overflow: auto;
+  }
+
+  .ai-agent .talk-content::-webkit-scrollbar,
+  .ai-edit .talk-content::-webkit-scrollbar{
+    width: 8px;
+  }
+
+  .ai-agent .talk-content::-webkit-scrollbar-track,
+  .ai-edit .talk-content::-webkit-scrollbar-track {
+    background: #252526;
+    border-radius: 999px;
+  }
+
+  .ai-agent .talk-content::-webkit-scrollbar-thumb,
+  .ai-edit .talk-content::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 999px;
+    border: 2px solid #252526;
+  }
+
+  .ai-agent .talk-messages,
+  .ai-edit .talk-messages {
+    white-space: normal;        /* 允许换行（别用 nowrap） */
+    overflow-wrap: anywhere;    /* 很长的连续字符串也能断行（推荐） */
+    word-break: break-word;     /* 兼容 */
+  }
+
   .ai-edit.open,
   .ai-agent.open {
     display: block;
