@@ -64,8 +64,16 @@
           </div>
         </div>
         <div class="talk-input">
-          <input type="text" placeholder="向AI请求代码修改建议..." v-model="aiStore.aiInput">
-          <button @click="aiStore.sendEditMsg(codeStore.getSelectedCode(editor!), editor!)">
+          <input 
+            type="text" 
+            placeholder="向AI请求代码修改建议..." 
+            v-model="aiStore.aiInput"
+            @keydown.ctrl.enter.prevent="handleSendEdit"
+          >
+          <button 
+            class="sendMsg"
+            @click="aiStore.sendEditMsg(codeStore.getSelectedCode(editor!), editor!)"
+          >
             <font-awesome-icon icon="fa-solid fa-paper-plane" />
           </button>
         </div>
@@ -84,8 +92,15 @@
           </div>
         </div>
         <div class="talk-input">
-          <input type="text" placeholder="向AI询问代码问题..." v-model="aiStore.aiInput">
-          <button @click="aiStore.sendAgentMsg(getCurrentCode())">
+          <input type="text" 
+            placeholder="向AI询问代码问题..." 
+            v-model="aiStore.aiInput"
+            @keydown.ctrl.enter.prevent="handleSendMsg"
+          >
+          <button 
+            class="sendMsg" 
+            @click="aiStore.sendAgentMsg(getCurrentCode())"
+          >
             <font-awesome-icon icon="fa-solid fa-paper-plane" />
           </button>
         </div>
@@ -154,6 +169,14 @@
   const isJSRoute = computed(() => {
     return route.path.endsWith('/js');
   });
+
+  const handleSendEdit = () => {
+    aiStore.sendEditMsg(codeStore.getSelectedCode(editor!), editor!)
+  }
+
+  const handleSendMsg = () => {
+    aiStore.sendAgentMsg(getCurrentCode())
+  }
 
   // 配置jsx
   function configureTypeScriptForJSX() {
