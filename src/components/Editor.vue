@@ -58,6 +58,7 @@
             </button>
           </div>
         </div>
+
         <div class="talk-content">
           <div class="talk-messages" v-for="(msg, index) in aiStore.aiEditMessages" :key="index">
             {{ msg }}
@@ -86,7 +87,7 @@
             <font-awesome-icon icon="fa-regular fa-circle-xmark" size="xl"/>
           </button>
         </div>
-        <div class="talk-content">
+        <div class="talk-content" ref="chatAgentEl">
           <div class="talk-messages" v-for="(msg, index) in aiStore.aiAgentMessages" :key="index">
             {{ msg }}
           </div>
@@ -106,11 +107,12 @@
         </div>
     </div>
   </div>
+
   <div v-if="aiStore.isLoading" class="ai-loading">AI正在思考...</div>
 </template>
 
 <script setup lang="ts">
-  import {ref, watch, computed ,onMounted , onUnmounted} from 'vue'
+  import {ref, watch, computed ,onMounted , onUnmounted, nextTick} from 'vue'
   import * as monaco from 'monaco-editor';
   import 'monaco-editor/esm/vs/language/html/monaco.contribution';
   import 'monaco-editor/esm/vs/language/css/monaco.contribution';
@@ -170,13 +172,42 @@
     return route.path.endsWith('/js');
   });
 
+  // enter + ctrl 快捷键调用函数
   const handleSendEdit = () => {
     aiStore.sendEditMsg(codeStore.getSelectedCode(editor!), editor!)
   }
-
   const handleSendMsg = () => {
     aiStore.sendAgentMsg(getCurrentCode())
   }
+
+  // 滚动条控制
+  const chatAgentEl = ref<HTMLElement | null>(null);
+
+  let autoFollow: boolean = true;
+
+  function isNearBottom(el: HTMLElement, threshold = 80): boolean {
+    return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  }
+
+  function scrollToBottom(): void {
+    const el = chatAgentEl.value;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function onScroll(): void {
+    const el = chatAgentEl.value;
+    if (!el) return;
+    autoFollow = isNearBottom(el);
+  }
+
+  watch(
+    () => aiStore.aiAgentMessages[aiStore.aiAgentMessages.length - 1],
+    async () => {
+      await nextTick();
+      if (autoFollow) scrollToBottom();
+    }
+  );
 
   // 配置jsx
   function configureTypeScriptForJSX() {
@@ -202,7 +233,7 @@
         contentUnformatted: 'pre,code,textarea',
         indentInnerHtml: false,
         preserveNewLines: true,
-        maxPreserveNewLines: null,
+        maxPreserveNewLines: 1,
         indentHandlebars: false,
         endWithNewline: false,
         extraLiners: 'head, body, /html',
@@ -299,6 +330,10 @@
       if (isJSRoute.value && props.language === 'javascript' && editor) {
         aiStore.enableAIAssistant(editor);
       }
+
+      const el = chatAgentEl.value;
+      if (!el) return;
+      el.addEventListener("scroll", onScroll);
     }
   })
 
@@ -326,6 +361,7 @@
     }
   })
 
+  // 卸载
   onUnmounted(() => {
     if (editor) {
       editor.dispose()
@@ -404,7 +440,7 @@
 
   .ai-agent .talk-messages,
   .ai-edit .talk-messages {
-    white-space: normal;        /* 允许换行（别用 nowrap） */
+    white-space: pre-wrap;      /* 保留换行符，同时允许自动折行 */
     overflow-wrap: anywhere;    /* 很长的连续字符串也能断行（推荐） */
     word-break: break-word;     /* 兼容 */
   }

@@ -47,35 +47,87 @@ export const useAiStore = defineStore('useAiStore', () => {
     aiAgentOpen.value = false
   }
 
+  const agentAbort = ref<AbortController | null>(null);
+
   async function sendAgentMsg(codeContext: string) {
-      if (!aiInput.value.trim()) return;
+    if (!aiInput.value.trim()) return;
 
-      aiAgentMessages.value.push(`User: ${aiInput.value}`);
-      const aiContent = document.querySelector('.talk-content');
-      if (aiContent) {
-        aiContent.scrollTop = aiContent.scrollHeight;
-      }
+    aiAgentMessages.value.push(`User: ${aiInput.value}`);
+    const aiContent = document.querySelector('.talk-content');
+    if (aiContent) aiContent.scrollTop = aiContent.scrollHeight;
 
-      const msg = aiInput.value
-      aiInput.value = ''
+    const msg = aiInput.value;
+    aiInput.value = '';
+    isLoading.value = true;
 
-      isLoading.value = true;
-      try {
-        // 获取AI回复，传递用户问题和代码上下文
-        const aiResponse = await getAITalk(msg, codeContext);
-        aiAgentMessages.value.push(`AI助手: ${aiResponse}`);
-        
-        // 再次滚动到底部显示AI回复
-        if (aiContent) {
-          aiContent.scrollTop = aiContent.scrollHeight;
+    // 先插入占位消息，后续不断改它
+    const aiIndex = aiAgentMessages.value.length;
+    aiAgentMessages.value.push(`AI助手: `);
+
+    // 用 rAF 做一下节流，token 很碎时不会卡
+    let pending = "";
+    let raf = 0;
+    const flush = () => {
+      aiAgentMessages.value[aiIndex] = `AI助手: ${aiAgentText}`;
+      if (aiContent) aiContent.scrollTop = aiContent.scrollHeight;
+      raf = 0;
+    };
+    let aiAgentText = "";
+
+    try {
+      // 终止上一次
+      agentAbort.value?.abort();
+      agentAbort.value = new AbortController();
+
+      await fetchSSEStream(
+        "/api/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer sk-IT2HedPEUDo4yfBTYEH0dhZ3SlPYeZoMM5QKeKFiTmyaslRP",
+          },
+          signal: agentAbort.value.signal,
+          body: JSON.stringify({
+            model: "moonshot-v1-8k",
+            stream: true,
+            messages: [
+              {
+                role: "system",
+                content:
+                  "你是一名 JavaScript 代码助手。请根据用户给出的代码片段和问题，给用户一些精简的建议。",
+              },
+              {
+                role: "user",
+                content: `这是我的代码：\n\`\`\`\n${codeContext}\n\`\`\`\n我的问题是：${msg}`,
+              },
+            ],
+            max_tokens: 200,
+            temperature: 0.7,
+          }),
+        },
+        (token) => {
+          // 打字机：token 到就追加
+          pending += token;
+          if (!raf) {
+            raf = requestAnimationFrame(() => {
+              aiAgentText += pending;
+              pending = "";
+              flush();
+            });
+          }
         }
-
-      } catch (error) {
-        console.error('发送消息失败:', error);
-        aiAgentMessages.value.push('AI助手: 抱歉，处理您的请求时出现了问题。');
-      } finally {
-        isLoading.value = false;
+      );
+    } catch (error: any) {
+      if (error?.name === "AbortError") {
+        aiAgentMessages.value[aiIndex] = `AI助手: （已停止生成）${aiAgentText}`;
+      } else {
+        console.error("发送消息失败:", error);
+        aiAgentMessages.value[aiIndex] = "AI助手: 抱歉，处理您的请求时出现了问题。";
       }
+    } finally {
+      isLoading.value = false;
+    }
   }
 
   async function sendEditMsg(codeContext: string, editor: monaco.editor.IStandaloneCodeEditor) {
@@ -223,37 +275,78 @@ export const useAiStore = defineStore('useAiStore', () => {
       }
   }
 
-    // ai问答异步函数
-  async function getAITalk(userQuestion: string, codeContext: string): Promise<string> {
-    try {
-      const response = await fetch('/api/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer sk-IT2HedPEUDo4yfBTYEH0dhZ3SlPYeZoMM5QKeKFiTmyaslRP',
-        },
-        body: JSON.stringify({
-          model: 'moonshot-v1-8k',
-          messages: [
-            {
-              role: 'system',
-              content: '你是一名 JavaScript 代码助手。请根据用户给出的代码片段和问题，给用户一些精简的建议。',
-            },
-            { 
-              role: 'user', 
-              content: `这是我的代码：\n\`\`\`\n${codeContext}\n\`\`\`\n我的问题是：${userQuestion}` 
-            },
-          ],
-          max_tokens: 200,
-          temperature: 0.7,
-        }),
-      });
+  function extractDeltaText(payload: any): string {
+    const choice = payload?.choices?.[0];
+    // OpenAI-like stream: { choices:[{ delta:{ content:"..." } }] }
+    const delta = choice?.delta?.content;
+    if (typeof delta === "string") return delta;
 
-      const data = await response.json();
-      return data.choices?.[0]?.message?.content?.trim() || '';
-    } catch (error) {
-      console.error('AI对话请求失败:', error);
-      return '抱歉，AI助手暂时无法响应，请稍后再试。';
+    // 有些兼容实现可能会走 message/content
+    const msg = choice?.message?.content;
+    if (typeof msg === "string") return msg;
+
+    // 也可能是 { choices:[{ text:"..." }] }
+    const text = choice?.text;
+    if (typeof text === "string") return text;
+
+    return "";
+  }
+
+  /**
+   * 读取 OpenAI 风格 SSE：
+   * data: {...}\n\n
+   * data: [DONE]\n\n
+   */
+  async function fetchSSEStream(
+    url: string,
+    fetchInit: RequestInit,
+    onToken: (t: string) => void,
+  ) {
+    const resp = await fetch(url, fetchInit);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.body) throw new Error("No response body (stream unsupported)");
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+
+    let buffer = "";
+    let done = false;
+
+    while (!done) {
+      const { value, done: readerDone } = await reader.read();
+      if (readerDone) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE 事件以 \n\n 分隔
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
+
+      for (const part of parts) {
+        // 可能有多行：event: ... / id: ... / data: ...
+        const lines = part.split("\n");
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+
+          const dataStr = line.slice(5).trim();
+          if (!dataStr) continue;
+
+          if (dataStr === "[DONE]") {
+            done = true;
+            break;
+          }
+
+          try {
+            const json = JSON.parse(dataStr);
+            const t = extractDeltaText(json);
+            if (t) onToken(t);
+          } catch {
+            // 有些实现 data: 直接推文本
+            onToken(dataStr);
+          }
+        }
+        if (done) break;
+      }
     }
   }
 

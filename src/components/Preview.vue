@@ -9,6 +9,22 @@
       width="100%" 
       height="100%">
     </iframe>
+
+    <div class="console">
+      <div class="console-bar">
+        <div class="title">
+          JS Console
+        </div>
+
+        <div class="action">
+          
+        </div>
+      </div>
+      <div class="console-content">
+        暂无输出
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -118,6 +134,43 @@
 <style>
  .sandbox{
   height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
  }
+
+ iframe{
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    border: 0;
+  }
+
+  .console{
+    height: 220px;           /* 你可以改成 160/240 */
+    width: 100%;
+    background: #0f1115;
+    color: #e6e6e6;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+ .console-bar{
+  background: #2d2d30;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #3e3e42;
+ }
+
+ .console-content{
+    flex: 1;                 /* 关键：用 flex 撑开 */
+    min-height: 0;           /* 关键：允许内部滚动 */
+    overflow: auto;
+    padding: 8px 10px 10px;
+  }
 
 </style>
