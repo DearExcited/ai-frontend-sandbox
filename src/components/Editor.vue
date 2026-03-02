@@ -440,9 +440,9 @@
 
   .ai-agent .talk-messages,
   .ai-edit .talk-messages {
-    white-space: pre-wrap;      /* 保留换行符，同时允许自动折行 */
-    overflow-wrap: anywhere;    /* 很长的连续字符串也能断行（推荐） */
-    word-break: break-word;     /* 兼容 */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .ai-edit.open,

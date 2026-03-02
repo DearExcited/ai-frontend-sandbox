@@ -10,21 +10,7 @@
       height="100%">
     </iframe>
 
-    <div class="console">
-      <div class="console-bar">
-        <div class="title">
-          JS Console
-        </div>
-
-        <div class="action">
-          
-        </div>
-      </div>
-      <div class="console-content">
-        暂无输出
-      </div>
-    </div>
-
+    <console></console>
   </div>
 </template>
 
@@ -33,11 +19,14 @@
   import { useCodeStore } from '../store/useCodeStore';
   import * as Babel from '@babel/standalone'
   import { useRoute } from 'vue-router';
+  import console from './console.vue';
+  type LogItem = { id: string; type: 'log'|'warn'|'error'|'info'; text: string; ts: number };
+  const logs = ref<LogItem[]>([]);
   const route = useRoute()
   const codeStore = useCodeStore()
   const previewFrame = ref<HTMLIFrameElement | null>(null);
   const language = computed(() => {
-    const routeName = route.path.split('/').pop();
+  const routeName = route.path.split('/').pop();
     switch(routeName) {
       case 'html': return 'html';
       case 'css': return 'css';
@@ -46,6 +35,29 @@
       default: return 'html'; // 默认值
     }
   });
+
+  // 通过监听获取输出
+  function jsMessage(e:MessageEvent){
+    const frameWin = previewFrame.value?.contentWindow;
+    if(!frameWin) return;
+
+    if (e.source !== frameWin) return;
+
+    const data = e.data;
+    if (!data || data.source !== 'sandbox-console') return;
+
+    logs.value.push({
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      type: data.method || 'log',
+      text: (data.args || []).join(' '),
+      ts: data.ts || Date.now(),
+    });
+  }
+
+  onMounted(() => {
+    window.addEventListener('message', jsMessage);
+  });
+
     /* 把 TSX → JS */
   function compileTsx(code: string): string {
     try {
@@ -137,6 +149,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
  }
 
  iframe{
@@ -145,32 +158,4 @@
     width: 100%;
     border: 0;
   }
-
-  .console{
-    height: 220px;           /* 你可以改成 160/240 */
-    width: 100%;
-    background: #0f1115;
-    color: #e6e6e6;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
- .console-bar{
-  background: #2d2d30;
-  padding: 12px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #3e3e42;
- }
-
- .console-content{
-    flex: 1;                 /* 关键：用 flex 撑开 */
-    min-height: 0;           /* 关键：允许内部滚动 */
-    overflow: auto;
-    padding: 8px 10px 10px;
-  }
-
 </style>
