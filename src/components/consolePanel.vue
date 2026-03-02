@@ -28,11 +28,13 @@
 </template>
 
 
-<script setup lang="ts" name="console">
+<script setup lang="ts" name="consolePanel">
   import { ref } from 'vue';
   type LogItem = { id: string; type: 'log'|'warn'|'error'|'info'; text: string; ts: number };
   const isOpen = ref(false);
-  const logs = ref<LogItem[]>([]);
+  const props = defineProps<{
+    logs: LogItem[]
+  }>()
 
   function toggleConsole(){
     isOpen.value = !isOpen.value;

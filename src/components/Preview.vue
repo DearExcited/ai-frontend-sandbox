@@ -10,7 +10,7 @@
       height="100%">
     </iframe>
 
-    <console></console>
+    <console :logs="logs"></console>
   </div>
 </template>
 
@@ -19,7 +19,7 @@
   import { useCodeStore } from '../store/useCodeStore';
   import * as Babel from '@babel/standalone'
   import { useRoute } from 'vue-router';
-  import console from './console.vue';
+  import console from './consolePanel.vue';
   type LogItem = { id: string; type: 'log'|'warn'|'error'|'info'; text: string; ts: number };
   const logs = ref<LogItem[]>([]);
   const route = useRoute()
@@ -27,7 +27,7 @@
   const previewFrame = ref<HTMLIFrameElement | null>(null);
   const language = computed(() => {
   const routeName = route.path.split('/').pop();
-    switch(routeName) {
+  switch(routeName) {
       case 'html': return 'html';
       case 'css': return 'css';
       case 'js': return 'javascript';
@@ -116,6 +116,21 @@
         <body>
           ${codeStore.htmlCode}
           <script>
+           (function () {
+            const methods = ['log','warn','error','info']
+            methods.forEach(method => {
+              const original = console[method]
+              console[method] = function (...args) {
+                window.parent.postMessage({
+                  source: 'sandbox-console',
+                  method,
+                  args,
+                  ts: Date.now()
+                }, '*')
+                original.apply(console, args)
+              }
+            })
+          })()
             ${codeStore.jsCode}
           <\/script>
         </body>
