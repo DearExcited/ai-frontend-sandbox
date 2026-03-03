@@ -44,7 +44,7 @@
 
 <style scoped>
   .console{
-    height: 148px;
+    height: 40px;
     width: 100%;
     background: #0f1115;
     color: #e6e6e6;
@@ -90,4 +90,18 @@
     cursor: pointer;
   }
 
+  .console-content::-webkit-scrollbar{
+    width: 8px;
+  }
+
+  .console-content::-webkit-scrollbar-track{
+    background: #252526;
+    border-radius: 999px;
+  }
+
+  .console-content::-webkit-scrollbar-thumb{
+    background: #5a5a5a;
+    border-radius: 999px;
+    border: 2px solid #252526;
+  }
 </style>
