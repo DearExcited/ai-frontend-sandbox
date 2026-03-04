@@ -7,8 +7,12 @@ import { debounceAsync } from "../utils/debounce";
 import { useDiffStore } from "./useDiffStore";
 
 export const useAiStore = defineStore('useAiStore', () => {
+  type ChatMsg = { role: "system" | "user" | "assistant"; content: string }
+
   const isEnabled     = ref(false)
   const isLoading     = ref(false)
+  const agentHistory       = ref<ChatMsg[]>([])
+  const MAX_TURNS = 10;
   const aiAgentMessages    = ref<string[]>([
     'AI助手已启用！',
     '我可以帮助您编写更好的JavaScript代码。',
@@ -49,14 +53,35 @@ export const useAiStore = defineStore('useAiStore', () => {
 
   const agentAbort = ref<AbortController | null>(null);
 
+  function buildAgentMsg(codeContext: string, userText: string):ChatMsg[] {
+    const systemPrompt: ChatMsg = {
+      role: "system",
+      content:"你是一名 JavaScript 代码助手。请结合对话上下文与当前代码，给出精简可执行的建议。",
+    }
+
+    const contextMsg: ChatMsg = {
+      role:"system",
+      content:`当前代码上下文如下（仅供参考，不要原样复述）：\n\`\`\`\n${codeContext}\n\`\`\``,
+    }
+
+    const recent = agentHistory.value.splice(-MAX_TURNS * 2)
+
+    return [
+      systemPrompt,
+      contextMsg,
+      ...recent,
+      { role: "user", content: userText },
+    ]
+  }
+
   async function sendAgentMsg(codeContext: string) {
     if (!aiInput.value.trim()) return;
 
-    aiAgentMessages.value.push(`User: ${aiInput.value}`);
+    const userText = aiInput.value.trim();
+    aiAgentMessages.value.push(`User: ${userText}`);
     const aiContent = document.querySelector('.talk-content');
     if (aiContent) aiContent.scrollTop = aiContent.scrollHeight;
 
-    const msg = aiInput.value;
     aiInput.value = '';
     isLoading.value = true;
 
@@ -79,6 +104,8 @@ export const useAiStore = defineStore('useAiStore', () => {
       agentAbort.value?.abort();
       agentAbort.value = new AbortController();
 
+      const messages = buildAgentMsg(codeContext, userText);
+
       await fetchSSEStream(
         "/api/chat/completions",
         {
@@ -91,17 +118,7 @@ export const useAiStore = defineStore('useAiStore', () => {
           body: JSON.stringify({
             model: "moonshot-v1-8k",
             stream: true,
-            messages: [
-              {
-                role: "system",
-                content:
-                  "你是一名 JavaScript 代码助手。请根据用户给出的代码片段和问题，给用户一些精简的建议。",
-              },
-              {
-                role: "user",
-                content: `这是我的代码：\n\`\`\`\n${codeContext}\n\`\`\`\n我的问题是：${msg}`,
-              },
-            ],
+            messages,
             max_tokens: 200,
             temperature: 0.7,
           }),
@@ -118,6 +135,14 @@ export const useAiStore = defineStore('useAiStore', () => {
           }
         }
       );
+
+      agentHistory.value.push({ role: "user", content: userText });
+      agentHistory.value.push({ role: "assistant", content: aiAgentText });
+
+      if (agentHistory.value.length > MAX_TURNS * 2) {
+        agentHistory.value = agentHistory.value.slice(-MAX_TURNS * 2);
+      }
+
     } catch (error: any) {
       if (error?.name === "AbortError") {
         aiAgentMessages.value[aiIndex] = `AI助手: （已停止生成）${aiAgentText}`;
@@ -434,6 +459,8 @@ function cleanAICode(aiCode: string): string {
    return {
     isEnabled,
     isLoading,
+    agentHistory,
+    MAX_TURNS,
     aiAgentMessages,
     aiEditMessages,
     aiInput,
@@ -451,5 +478,6 @@ function cleanAICode(aiCode: string): string {
     sendEditMsg,
     enableAIAssistant,
     disableAIAssistant,
+    buildAgentMsg,
   }
 })

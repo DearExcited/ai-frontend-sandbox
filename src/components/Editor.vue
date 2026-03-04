@@ -98,11 +98,13 @@
             v-model="aiStore.aiInput"
             @keydown.ctrl.enter.prevent="handleSendMsg"
           >
+          
           <button 
             class="sendMsg" 
             @click="aiStore.sendAgentMsg(getCurrentCode())"
           >
-            <font-awesome-icon icon="fa-solid fa-paper-plane" />
+            <font-awesome-icon v-if="aiStore.isLoading" icon="fa-solid fa-play" />
+            <font-awesome-icon v-else  icon="fa-solid fa-paper-plane" />
           </button>
         </div>
     </div>
