@@ -1,3 +1,4 @@
+<!-- Tabs组件，主要用来进行语言的切换 -->
 <template>
   <el-tabs v-model="activeName" @tab-click="handClick" class="tabs" type="card">
     <el-tab-pane label="HTML" name="html" class="tab"></el-tab-pane>
@@ -15,6 +16,7 @@
   const router = useRouter()
   const activeName = ref('html')
   
+  // 点击事件
   const handClick = (tab:any) => {
     router.push(`/home/${tab.paneName}`)
   }

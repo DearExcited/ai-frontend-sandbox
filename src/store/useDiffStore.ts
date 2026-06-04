@@ -23,9 +23,9 @@ export interface DiffResult {
 
 export const useDiffStore = defineStore('diffStore', () => {
     // 响应式状态
-    const originalCode = ref('');
-    const modifiedCode = ref('');
-    const modifiedCodeRaw = ref('');
+    const originalCode = ref('');   //原代码
+    const modifiedCode = ref('');   //修改后的代码
+    const modifiedCodeRaw = ref('');    //ai返回原始结果
     const currentSelection = ref<monaco.Selection | null>(null);
     const isDiffMode = ref(false);
     const diffResult = ref<DiffResult>({ lines: [], stats: { added: 0, removed: 0 } });
@@ -38,12 +38,15 @@ function computeLineLevelDiff(
   originalText: string,
   modifiedText: string
 ): DiffResult {
+  // 格式化字符串
   const originalLines = originalText.split('\n');
   const modifiedLines = modifiedText.split('\n');
 
+  // 初始化返回的结果
   const lines: DiffLine[] = [];
   const stats = { added: 0, removed: 0 };
 
+  // 创建索引，i指向原始代码，j指向修改后的代码，lineNumber指向diff结果
   let i = 0, j = 0;
   let lineNumber = 1;
 
@@ -67,12 +70,14 @@ function computeLineLevelDiff(
     return line1.trim() === line2.trim();
   }
 
+  // 循环查找
   while (i < originalLines.length || j < modifiedLines.length) {
     const originalLine = i < originalLines.length ? originalLines[i] : null;
     const modifiedLine = j < modifiedLines.length ? modifiedLines[j] : null;
 
+    // 比较两行之间是否相同
     if (linesEqual(originalLine, modifiedLine)) {
-      // 行内容相同（忽略空格），使用修改后的版本（保持其缩进）
+      // 行内容相同（忽略空格），放入返回结果中，使用修改后的版本（保持其缩进）
       lines.push({
         lineNumber: lineNumber++,
         type: 'unchanged',
@@ -134,7 +139,8 @@ function computeLineLevelDiff(
     }
   }
 
-    function getIndent(s: string) {
+  // 缩进处理
+  function getIndent(s: string) {
     const m = s.match(/^\s*/);
     return m ? m[0] : '';
   }
@@ -207,6 +213,7 @@ function computeLineLevelDiff(
       const range = new monaco.Range(actualLineNumber, 1, actualLineNumber, 1);
 
       switch (line.type) {
+        // 新增的行
         case 'added':
           decorations.push({
             range: range,
@@ -217,6 +224,7 @@ function computeLineLevelDiff(
             }
           });
           break;
+          // 删除的行
         case 'removed':
           decorations.push({
             range: range,
@@ -230,6 +238,7 @@ function computeLineLevelDiff(
       }
     }
 
+    // 将装饰放到编辑器里
     diffDecorations.value = editor.deltaDecorations(diffDecorations.value, decorations);
     return diffDecorations.value;
   }
@@ -293,6 +302,7 @@ function computeLineLevelDiff(
     originalCode.value = code;
   }
 
+  // 还原函数
   function restoreOriginalCode(editor: monaco.editor.IStandaloneCodeEditor | null) {
     if (!editor || !currentSelection.value) return;
 

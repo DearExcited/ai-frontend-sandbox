@@ -1,6 +1,8 @@
 <template>
   <div class="edtior-container">
+    <!-- 编辑器核心 -->
     <div ref="editorContainer" style="height: 100%;"></div>
+    <!-- 交互按钮，启用ai功能 -->
     <div class="editor-actions" v-if="language === 'javascript'">
       <div class="action-btn">
         <font-awesome-icon icon="fa-solid fa-robot"/>
@@ -39,6 +41,7 @@
       </div>
     </div>
 
+    <!-- edit模式面板 -->
     <div class="ai-edit" :class="{ open: aiStore.aiEditOpen }">
         <div class="talk-header">
           <span class="talk-title">AI-EDIT</span>
@@ -80,6 +83,7 @@
         </div>
     </div>
 
+    <!-- agent模式面板 -->
     <div class="ai-agent" :class="{ open: aiStore.aiAgentOpen }">
         <div class="talk-header">
           <span class="talk-title">AI-AGENT</span>
@@ -110,6 +114,7 @@
     </div>
   </div>
 
+  <!-- 状态 -->
   <div v-if="aiStore.isLoading" class="ai-loading">AI正在思考...</div>
 </template>
 
@@ -122,23 +127,23 @@
   import { useCodeStore } from '../store/useCodeStore';
   import { useAiStore } from '../store/useAiStore';
   import { useDiffStore } from '../store/useDiffStore';
-  import { useRoute } from 'vue-router';
   import { loadReactTypes } from '../utils/loadReactTypes'
   import { ElTooltip } from 'element-plus';
-  const route = useRoute()
   const codeStore = useCodeStore()
   const diffStore = useDiffStore()
   const aiStore = useAiStore()
-  const editorContainer = ref<HTMLElement | null>(null)
-  let editor: monaco.editor.IStandaloneCodeEditor | null = null
+  const editorContainer = ref<HTMLElement | null>(null)   //编辑器DOM元素
+  let editor: monaco.editor.IStandaloneCodeEditor | null = null  //编辑器实例
+  const chatAgentEl = ref<HTMLElement | null>(null);  // 需要控制滚动条的DOM元素，即为与ai的聊天区域
+  let autoFollow: boolean = true;
 
   const props = defineProps<{
     language: 'html' | 'css' | 'javascript' | 'typescript'
-  }>()
-  const tipTool = ref('自动补全已关闭')
-  const autoOn = ref(true)
+  }>()                                                             //路由props，传递语言类型
+  const tipTool = ref('自动补全已关闭')                     //交互按钮提示信息
+  const autoOn = ref(true)                                 //自动补全状态
 
-  // 获取当前语言的代码
+  // 获取当前语言的代码,用于发送ai
   const getCurrentCode = () => {
     switch (props.language) {
       case 'html': return codeStore.htmlCode
@@ -151,12 +156,13 @@
   // 自动补全切换
   const toggleAutoComplete = () => {
     tipTool.value = tipTool.value.includes('已关闭')? '自动补全已开启': '自动补全已关闭'
-    autoOn.value = !autoOn.value
+    // 自动补全状态切换
     if( !aiStore.isEnabled ){
       aiStore.enableAIAssistant(editor!)
     } else {
       aiStore.disableAIAssistant()
     }
+    autoOn.value = !autoOn.value
   }
 
   // 更新store中的代码
@@ -169,10 +175,10 @@
     }
   }
 
-  // 判断当前是否为JS路由
+  // 判断当前是否为JS路由，可以不用路由路径判断
   const isJSRoute = computed(() => {
-    return route.path.endsWith('/js');
-  });
+    return props.language === 'javascript'
+  })
 
   // enter + ctrl 快捷键调用函数
   const handleSendEdit = () => {
@@ -182,11 +188,7 @@
     aiStore.sendAgentMsg(getCurrentCode())
   }
 
-  // 滚动条控制
-  const chatAgentEl = ref<HTMLElement | null>(null);
-
-  let autoFollow: boolean = true;
-
+  // 滚动条的逻辑，接近底部的时候自动划到底部,但如果用户上划就不再强制划到底部,用户若划到底部就重新启动自动跟随的逻辑
   function isNearBottom(el: HTMLElement, threshold = 80): boolean {
     return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
   }
@@ -274,6 +276,7 @@
 
   // 确保DOM渲染已经完成
   onMounted(async () => {
+    // 挂载元素之后加载保存的代码
     codeStore.getLocalCode();
     (window as any).monaco = monaco;
 
@@ -281,6 +284,7 @@
     configureHTMLLanguage();
     configureCSSLanguage();
 
+    // 将编辑器实例挂载到真实DOM上
     if (editorContainer.value) {
       editor = monaco.editor.create(editorContainer.value, {
         language: props.language,
@@ -335,6 +339,7 @@
 
       const el = chatAgentEl.value;
       if (!el) return;
+      // 绑定滚动监听器实现智能滚动
       el.addEventListener("scroll", onScroll);
     }
   })

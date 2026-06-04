@@ -1,5 +1,7 @@
+<!-- 效果展示区组件，分两部分，上面渲染代码效果，底部输出js的信息 -->
 <template>
   <div class="sandbox">
+    <!-- 将代码拼接成字符串之后放在iframe中运行，让iframe渲染在页面上,相当于一个独立的小浏览器环境 -->
     <iframe 
       title="my-html" 
       ref="previewFrame" 
@@ -24,6 +26,7 @@
   const logs = ref<LogItem[]>([]);
   const route = useRoute()
   const codeStore = useCodeStore()
+  // 沙箱DOM元素绑定
   const previewFrame = ref<HTMLIFrameElement | null>(null);
   const language = computed(() => {
   const routeName = route.path.split('/').pop();
@@ -38,6 +41,7 @@
 
   // 通过监听获取输出
   function jsMessage(e:MessageEvent){
+    // 确认消息来源来自iframe
     const frameWin = previewFrame.value?.contentWindow;
     if(!frameWin) return;
 
@@ -46,6 +50,7 @@
     const data = e.data;
     if (!data || data.source !== 'sandbox-console') return;
 
+    // log格式化
     logs.value.push({
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       type: data.method || 'log',
@@ -54,10 +59,12 @@
     });
   }
 
+  // 挂载组件时将挂上监听器
   onMounted(() => {
     window.addEventListener('message', jsMessage);
   });
 
+  // 浏览器不能直接编译TSX，所以需要这一步
     /* 把 TSX → JS */
   function compileTsx(code: string): string {
     try {
@@ -73,6 +80,7 @@
     }
   }
 
+  // 代码模板插入到沙箱中
   const generateReactHtml = () => {
     const compiledJs = compileTsx(codeStore.reactCode);
 
@@ -104,6 +112,7 @@
     `;
   };
 
+  // 这里重写了iframe中的console方法, 把日志通过 postMessage 发给父页面,同时继续调用原来的 console.log
   const generateFullHtml = () => {
     return `
       <!DOCTYPE html>
@@ -138,6 +147,7 @@
     `;
   };
   
+  // 更新展示区，感觉要加防抖
   const updatePreview = () => {
     if (!previewFrame.value) return 
 
@@ -149,6 +159,7 @@
 
   }
 
+  // 监听代码变化
   watch(
     () => [codeStore.htmlCode, codeStore.cssCode, codeStore.jsCode, codeStore.reactCode, language.value],
     updatePreview,
