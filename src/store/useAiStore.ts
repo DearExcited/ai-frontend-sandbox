@@ -314,7 +314,7 @@ export const useAiStore = defineStore('useAiStore', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: 'Bearer sk-IT2HedPEUDo4yfBTYEH0dhZ3SlPYeZoMM5QKeKFiTmyaslRP',
+            Authorization: `Bearer ${import.meta.env.VITE_MOONSHOT_API_KEY}`,
           },
           body: JSON.stringify({
             model: 'moonshot-v1-8k',
@@ -434,7 +434,7 @@ export const useAiStore = defineStore('useAiStore', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: 'Bearer sk-IT2HedPEUDo4yfBTYEH0dhZ3SlPYeZoMM5QKeKFiTmyaslRP',
+          Authorization: `Bearer ${import.meta.env.VITE_MOONSHOT_API_KEY}`,
         },
         body: JSON.stringify({
           model: 'moonshot-v1-8k',

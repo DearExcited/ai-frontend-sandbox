@@ -87,7 +87,7 @@ async function getAICompletion(code: string): Promise<string> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: 'Bearer sk-IT2HedPEUDo4yfBTYEH0dhZ3SlPYeZoMM5QKeKFiTmyaslRP', // ← 填你的 key
+      Authorization: `Bearer ${import.meta.env.VITE_MOONSHOT_API_KEY}`, // ← 填你的 key
     },
     body: JSON.stringify({
       model: 'moonshot-v1-8k',
