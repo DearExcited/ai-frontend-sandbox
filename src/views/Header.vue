@@ -91,12 +91,6 @@
                 <span class="version-date">{{ new Date(version.createdAt).toLocaleString() }}</span>
               </div>
               <div class="version-actions">
-                <el-tooltip content="预览" placement="top">
-                  <button class="version-btn">
-                    <font-awesome-icon icon="fa-solid fa-eye" />
-                  </button>
-                </el-tooltip>
-
                 <el-tooltip content="Diff" placement="top">
                   <button class="version-btn" @click.stop="handleVersionDiff(version)">
                     <font-awesome-icon icon="fa-solid fa-code-compare" />
@@ -109,7 +103,7 @@
                   </button>
                 </el-tooltip>
                 <el-tooltip content="删除版本" placement="top">
-                  <button class="version-btn version-btn--danger">
+                  <button class="version-btn version-btn--danger" @click.stop="handleDelete(project, version)">
                     <font-awesome-icon icon="fa-solid fa-trash" />
                   </button>
                 </el-tooltip>
@@ -184,6 +178,7 @@
       ElMessage.error(error.message || '获取项目列表失败')
     }
   }
+
   watch([activeName, drawerVisible], async () => {
     if(activeName.value === 'version' || drawerVisible.value === true){
        await loadProjectList()
@@ -233,8 +228,13 @@
     try{
       await projectService.update(form.projectId, files)
       await projectService.saveVersion(form.projectId, form.versionName)
+      delete versionMap.value[form.projectId]
+      if (expandedProject.value === form.projectId) {
+        const res = await projectService.getVersion(form.projectId)
+        versionMap.value[form.projectId] = res.code === 0 ? res.data : []
+      }
       ElMessage.success('版本保存成功')
-    dialogFormVisible.value = false
+      dialogFormVisible.value = false
     }catch(error: any){
        ElMessage.error(error.message || '获取项目列表失败')
     }
@@ -290,13 +290,58 @@
         `确定要回滚到版本「${version.name || version.versionName || '未命名版本'}」吗？\n\n建议先完成 Diff 对比。回滚后当前编辑器代码会被该版本覆盖，并会自动生成一条新的回滚版本记录。`,
         '确认回滚',
         {
-          confirmButtonText: 'OK',
-          cancelButtonText: 'Cancel',
+          confirmButtonText: '回滚',
+          cancelButtonText: '取消',
           type: 'warning',
         }
       )
-    }catch(error){
-      
+
+      const rollbackFiles = {
+        html: version.files?.html || version.html || '',
+        css: version.files?.css || version.css || '',
+        javascript: version.files?.javascript || version.javascript || '',
+      }
+
+      codeStore.htmlCode = rollbackFiles.html
+      codeStore.cssCode = rollbackFiles.css
+      codeStore.jsCode = rollbackFiles.javascript
+
+      await projectService.update(project._id, rollbackFiles, project.name)
+
+      await projectService.restoreVersion(project._id, version._id)
+
+      delete versionMap.value[project._id]
+      await loadProjectList()
+      // 如果当前还是展开状态，重新拉版本列表
+      if (expandedProject.value === project._id) {
+        const res = await projectService.getVersion(project._id)
+        versionMap.value[project._id] = res.code === 0 ? res.data : []
+      }
+      ElMessage.success('回滚成功，已生成新的版本记录')
+    }catch(error:any){
+      if (error === 'cancel' || error === 'close') {
+        return
+      }
+
+      ElMessage.error(error.message || '回滚失败')
+    }
+  }
+
+  const handleDelete = async(project: any, version : any) => {
+    try{
+      if(!project || !version) return
+      await projectService.deleteVersion(project._id, version._id)
+      delete versionMap.value[project._id]
+      await loadProjectList()
+      // 如果当前还是展开状态，重新拉版本列表
+      if (expandedProject.value === project._id) {
+        const res = await projectService.getVersion(project._id)
+        versionMap.value[project._id] = res.code === 0 ? res.data : []
+      }
+
+      ElMessage.success('删除成功，已生成新的版本记录')
+    }catch(error: any){
+      ElMessage.error(error.message || '删除版本失败')
     }
   }
 </script>

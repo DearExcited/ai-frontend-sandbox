@@ -146,4 +146,41 @@ router.post('/:versionId/restore', async (req:express.Request<{id: string, versi
     })
   }
 })
+
+router.delete('/:versionId', async (req: express.Request<{ id: string, versionId: string }>, res) => {
+  try{
+    const { id: projectId, versionId } = req.params
+    if (
+      !mongoose.Types.ObjectId.isValid(projectId) ||
+      !mongoose.Types.ObjectId.isValid(versionId)
+    ) {
+      return res.status(400).json({
+        code: 400,
+        message: 'ID 格式不合法'
+      })
+    }
+
+    const version = await Version.findByIdAndDelete(versionId)
+
+    if(!version){
+      return res.status(404).json({
+        code:404,
+        message:'版本不存在'
+      })
+    }
+
+    res.json({
+      code: 0,
+      message: '删除版本成功',
+      data: version
+    })
+  }catch(error){
+      res.status(500).json({
+        code: 500,
+        message: '删除版本失败',
+        error
+      })
+    }
+} )
+
 export default router

@@ -2,7 +2,7 @@ const BASE = '/backend/api'
 
 export const projectService ={
   getAll: () => fetch(`${BASE}/projects`).then(r => r.json()),
-  getProject :(id: string) => fetch(`&{BASE}/projects/${id}`).then(r => r.json()),
+  getProject :(id: string) => fetch(`${BASE}/projects/${id}`).then(r => r.json()),
   create: (name:string) => fetch(`${BASE}/projects`,{
     method:'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -27,5 +27,8 @@ export const projectService ={
   restoreVersion:(projectId: string, versionId: string) => fetch(`${BASE}/projects/${projectId}/versions/${versionId}/restore`,{
     method:'POST',
     }
-  ).then(r => r.json())
+  ).then(r => r.json()),
+  deleteVersion:(projectId:string ,versionId: string) => fetch(`${BASE}/projects/${projectId}/versions/${versionId}`, {
+    method:'DELETE'
+  }).then(r => r.json())
 }

@@ -12,12 +12,12 @@ const app = express()
 app.use(cors())
 // 让后端可以解析JSON请求体
 app.use(express.json())
-app.use('/api/projects', projectsRouter)
 app.use('/api/projects/:id/versions', versionRouter)
+app.use('/api/projects', projectsRouter)
 // 测试接口
 app.get('/health', (rep, res) => {
   res.json({ 
-    state:'请求成功',
+    state:'请求成功=========================',
     db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   })
 })
