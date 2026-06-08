@@ -96,13 +96,15 @@
                     <font-awesome-icon icon="fa-solid fa-eye" />
                   </button>
                 </el-tooltip>
-                <el-tooltip content="Diff" placement="top" @click="versionDiff()">
-                  <button class="version-btn">
+
+                <el-tooltip content="Diff" placement="top">
+                  <button class="version-btn" @click.stop="handleVersionDiff(version)">
                     <font-awesome-icon icon="fa-solid fa-code-compare" />
                   </button>
                 </el-tooltip>
+
                 <el-tooltip content="回滚" placement="top">
-                  <button class="version-btn version-btn--danger">
+                  <button class="version-btn version-btn--danger" @click.stop="handleRollBack(project ,version)">
                     <font-awesome-icon icon="fa-solid fa-rotate-left" />
                   </button>
                 </el-tooltip>
@@ -121,18 +123,25 @@
       </div>
     </el-drawer>
   </div>
+
+  
+  <diff-dialog-form></diff-dialog-form>
+
 </template>
 
 <script setup lang="ts">
   import { projectService } from '../api/projectService';
   import {ref, reactive, watch} from 'vue'
   import { useCodeStore } from '../store/useCodeStore';
+  import { useVersionDiffStore } from '../store/useVersionDiffStroe.ts';
   import type { TabsPaneContext } from 'element-plus'
-  import { ElDialog, ElForm, ElButton, ElFormItem, ElOption, ElSelect, ElInput, ElTabs, ElTabPane, ElMessage, ElDrawer } from 'element-plus';
+  import { ElDialog, ElForm, ElButton, ElFormItem, ElOption, ElSelect, ElInput, ElTabs, ElTabPane, ElMessage, ElDrawer,ElTooltip, ElMessageBox } from 'element-plus';
+  import diffDialogForm from '../components/diffDialogForm.vue';
   const dialogFormVisible = ref(false)
   const formLabelWidth = '140px'
   const proJectname = ref('')
   const codeStore = useCodeStore()
+  const versionDiffStore = useVersionDiffStore()
   const handleClick = (tab: TabsPaneContext, event: Event) => {
     console.log(tab, event)
   }
@@ -253,8 +262,42 @@
       ElMessage.error(error.message || '删除失败')
     }
   }
-  const versionDiff = () => {
-    
+  const handleVersionDiff = async (version : any) => {
+    try{
+      versionDiffStore.openDiff({
+        versionName:version.description || '历史版本',
+         originalFiles: {
+          html: version.files?.html || version.html || '',
+          css: version.files?.css || version.css || '',
+          javascript: version.files?.javascript || version.javascript || '',
+        },
+
+        // 右边：当前编辑器代码，不需要保存
+        currentFiles: {
+          html: codeStore.htmlCode,
+          css: codeStore.cssCode,
+          javascript: codeStore.jsCode,
+        },
+      })
+    }catch(error :any){
+      ElMessage.error(error.message || '打开版本对比失败')
+    }
+  }
+
+  const handleRollBack = async (project : any ,version : any) => {
+    try{
+      await ElMessageBox.confirm(
+        `确定要回滚到版本「${version.name || version.versionName || '未命名版本'}」吗？\n\n建议先完成 Diff 对比。回滚后当前编辑器代码会被该版本覆盖，并会自动生成一条新的回滚版本记录。`,
+        '确认回滚',
+        {
+          confirmButtonText: 'OK',
+          cancelButtonText: 'Cancel',
+          type: 'warning',
+        }
+      )
+    }catch(error){
+      
+    }
   }
 </script>
 
