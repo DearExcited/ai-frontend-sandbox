@@ -4,6 +4,7 @@ import dotenv from 'dotenv'
 import mongoose from 'mongoose'
 import projectsRouter from './routes/project.js'
 import versionRouter from './routes/version.js'
+import aiRouter from'./routes/ai.js'
 dotenv.config()
 
 // 后端服务器实例
@@ -14,10 +15,11 @@ app.use(cors())
 app.use(express.json())
 app.use('/api/projects/:id/versions', versionRouter)
 app.use('/api/projects', projectsRouter)
+app.use('/api/ai', aiRouter)
 // 测试接口
 app.get('/health', (rep, res) => {
   res.json({ 
-    state:'请求成功=========================',
+    state:'请求成功',
     db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   })
 })
