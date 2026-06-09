@@ -297,6 +297,39 @@ function computeLineLevelDiff(
     return diffResultData;
   }
 
+  // 完整文件 diff - 整体替换，不依赖选中区域
+  function processFullDiff(editor: monaco.editor.IStandaloneCodeEditor | null, originalText: string, modifiedText: string) {
+    if (!editor) return null
+
+    const model = editor.getModel()
+    if (!model) return null
+
+    originalCode.value = originalText
+    modifiedCode.value = modifiedText
+    modifiedCodeRaw.value = modifiedText
+    selectionStartLine.value = 1
+
+    // 用整个文件范围模拟 selection
+    const totalLines = model.getLineCount()
+    const fullRange = new monaco.Range(1, 1, totalLines, model.getLineMaxColumn(totalLines))
+    currentSelection.value = new monaco.Selection(1, 1, totalLines, model.getLineMaxColumn(totalLines))
+
+    const diffResultData = computeLineLevelDiff(originalText, modifiedText)
+    const diffText = formatDiffWithColors(diffResultData)
+
+    editor.executeEdits('diff-full', [{
+      range: fullRange,
+      text: diffText,
+      forceMoveMarkers: true
+    }])
+
+    applyDiffToEditorAtPosition(editor, diffResultData, 1)
+    editor.updateOptions({ readOnly: true })
+    isDiffMode.value = true
+
+    return diffResultData
+  }
+
   // 保存源代码
   function saveOriginalCode(code: string): void {
     originalCode.value = code;
@@ -436,5 +469,6 @@ function computeLineLevelDiff(
     formatDiffWithColors,
     applyDiffToEditorAtPosition,
     processDiff,
+    processFullDiff,
   };
 });

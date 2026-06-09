@@ -1,6 +1,4 @@
 import express from 'express'
-import mongoose from 'mongoose'
-import Project from '../models/Project.js'
 import type { Request, Response } from 'express'
 import { extractJson } from '../utils/extractJson.js'
 
@@ -58,9 +56,9 @@ export async function callAi(messages: ChatMessage[]) {
  */
 router.post('/fix-error', async (req:Request, res:Response) => {
   try{
-    const {EMessage, files, target = 'all', selectedCode} = req.body
+    const {eMessage, files, target = 'all', selectedCode} = req.body
 
-    if(!EMessage) {
+    if(!eMessage) {
       return res.status(400).json({
         code: 1,
         message: 'errorMessage 不能为空',
@@ -103,7 +101,7 @@ router.post('/fix-error', async (req:Request, res:Response) => {
       {
         role: 'user',
         content:`报错信息：
-          ${EMessage}
+          ${eMessage}
 
           修复目标：
           ${target}

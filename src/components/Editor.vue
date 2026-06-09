@@ -213,6 +213,34 @@
     }
   );
 
+  // 监听 fixAction，由 consolePanel 触发确认或还原
+  watch(
+    () => aiStore.fixAction,
+    (action) => {
+      if (!action || !editor) return
+      if (action === 'confirm') {
+        diffStore.replaceCode(editor)
+      } else if (action === 'revert') {
+        diffStore.restoreOriginalCode(editor)
+      }
+      aiStore.fixAction = null
+      aiStore.pendingFix = null
+    }
+  )
+
+  // 监听 pendingFix，有修复结果时针对当前语言执行 processFullDiff
+  watch(
+    () => aiStore.pendingFix,
+    (fix) => {
+      if (!fix || !editor) return
+      const key = props.language as keyof typeof fix
+      const fixedCode = fix[key]
+      if (!fixedCode) return
+      const currentCode = getCurrentCode()
+      diffStore.processFullDiff(editor, currentCode, fixedCode)
+    }
+  )
+
   // 配置jsx
   function configureTypeScriptForJSX() {
     monaco.languages.typescript.typescriptDefaults.setCompilerOptions({

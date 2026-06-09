@@ -3,12 +3,15 @@ import { defineStore } from "pinia";
 import { languages } from 'monaco-editor'
 import * as monaco from 'monaco-editor'
 import { debounceAsync } from "../utils/debounce";
+import { aiService } from '../api/aiService'
 import { useDiffStore } from "./useDiffStore";
-
+import { useCodeStore } from "./useCodeStore";
+import { ElMessage } from "element-plus";
 export const useAiStore = defineStore('useAiStore', () => {
   // 消息类型，定义每一个发送或者接收到的消息
   type ChatMsg = { role: "system" | "user" | "assistant"; content: string }
 
+  const codeStore = useCodeStore()
   // ai助手内联补全开启状态
   const isEnabled     = ref(false)
   // 加载状态
@@ -42,6 +45,15 @@ export const useAiStore = defineStore('useAiStore', () => {
   const throttleFlags  = ref(new Map<string, boolean>())
   // 防抖
   const getAICompletionDebounced = debounceAsync(getAICompletion, 500)
+
+  // console 一键修复的待确认状态
+  const pendingFix = ref<{
+    html: string
+    css: string
+    javascript: string
+  } | null>(null)
+  // 'confirm' 触发 replaceCode，'revert' 触发 restoreOriginalCode，null 表示无操作
+  const fixAction = ref<'confirm' | 'revert' | null>(null)
 
   // ai交互开关
   function openEdit() {
@@ -505,6 +517,39 @@ function cleanAICode(aiCode: string): string {
   return cleanedCode.trim();
 }
 
+// 修复错误
+async function fixByAi (eMessage: string[]){
+  try{
+    isLoading.value = true
+    const res = await aiService.getFixCode({
+      eMessage,
+      files: {
+        html: codeStore.htmlCode,
+        css: codeStore.cssCode,
+        javascript: codeStore.jsCode,
+      },
+      target: 'all',
+  })
+
+  if (res.code !== 0) {
+      ElMessage.error(res.message || '修复失败')
+      return
+  }
+  const fixedFiles = res.data.fixedFiles
+  pendingFix.value = {
+    html: fixedFiles.html,
+    css: fixedFiles.css,
+    javascript: fixedFiles.javascript,
+  }
+
+  }catch(error: any){
+    ElMessage.error(error.message || 'AI 修复失败')
+  }finally {
+    isLoading.value = false
+  }
+}
+
+
    onUnmounted(() => {
     disableAIAssistant()
   })
@@ -532,5 +577,8 @@ function cleanAICode(aiCode: string): string {
     enableAIAssistant,
     disableAIAssistant,
     buildAgentMsg,
+    pendingFix,
+    fixAction,
+    fixByAi,
   }
 })

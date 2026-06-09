@@ -2,16 +2,25 @@
   <div class="console" :class="{open : isOpen}">
     <div class="console-bar">
       <div class="title">
-        JS Console
+        Console
       </div>
 
-      <div class="action" @click="toggleConsole()">
-        <div v-if="isOpen">
-          <font-awesome-icon icon="fa-solid fa-chevron-down" />
-        </div>
-
-        <div v-else>
-          <font-awesome-icon icon="fa-solid fa-chevron-up" />
+      <div class="bar-actions">
+        <!-- 有待确认的修复时显示确认/还原按钮 -->
+        <template v-if="aiStore.pendingFix">
+          <el-button size="small" type="success" @click="confirmFix">应用修复</el-button>
+          <el-button size="small" @click="revertFix">还原</el-button>
+        </template>
+        <el-button v-else size="small" type="warning" @click="handleFixError" :loading="aiStore.isLoading">
+          一键修复
+        </el-button>
+        <div class="action" @click="toggleConsole()">
+          <div v-if="isOpen">
+            <font-awesome-icon icon="fa-solid fa-chevron-down" />
+          </div>
+          <div v-else>
+            <font-awesome-icon icon="fa-solid fa-chevron-up" />
+          </div>
         </div>
       </div>
     </div>
@@ -19,8 +28,12 @@
       <div v-if="logs.length === 0">暂无输出</div>
       <div v-else>
         <div v-for="item in logs" :key="item.id">
-          <span style="opacity:.7;">[{{ item.type }}]</span>
-          {{ item.text }}
+          <div>
+            <span style="opacity:.7;">[{{ item.type }}]</span>
+            <div class="console-message">
+              {{ item.text }}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -29,9 +42,12 @@
 
 
 <script setup lang="ts" name="consolePanel">
+  import { ElButton, ElMessage } from 'element-plus';
   import { ref } from 'vue';
+  import { useAiStore } from '../store/useAiStore';
   type LogItem = { id: string; type: 'log'|'warn'|'error'|'info'; text: string; ts: number };
   const isOpen = ref(false);
+  const aiStore = useAiStore()
   const props = defineProps<{
     logs: LogItem[]
   }>()
@@ -40,6 +56,29 @@
     isOpen.value = !isOpen.value;
   }
 
+  const handleFixError = async () => {
+    const eMessage = props.logs
+      .filter(item => item.type === 'error')
+      .map(item => item.text)
+
+    if (eMessage.length === 0) {
+      ElMessage.info('没有发现错误日志')
+      return
+    }
+
+    await aiStore.fixByAi(eMessage)
+  }
+
+  const confirmFix = () => {
+    if (!aiStore.pendingFix) return
+    aiStore.fixAction = 'confirm'
+    ElMessage.success('已应用修复')
+  }
+
+  const revertFix = () => {
+    aiStore.fixAction = 'revert'
+    ElMessage.info('已还原')
+  }
 </script>
 
 <style scoped>
@@ -90,6 +129,12 @@
     cursor: pointer;
   }
 
+  .bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   .console-content::-webkit-scrollbar{
     width: 8px;
   }
@@ -103,5 +148,9 @@
     background: #5a5a5a;
     border-radius: 999px;
     border: 2px solid #252526;
+  }
+  .console-message{
+    display: flex;
+    justify-content:space-between;
   }
 </style>

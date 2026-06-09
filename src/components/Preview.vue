@@ -139,6 +139,24 @@
                 original.apply(console, args)
               }
             })
+
+            window.onerror = function(message, source, lineno, colno) {
+              window.parent.postMessage({
+                source: 'sandbox-console',
+                method: 'error',
+                args: [message + ' (' + source + ':' + lineno + ':' + colno + ')'],
+                ts: Date.now()
+              }, '*')
+            }
+
+            window.addEventListener('unhandledrejection', function(e) {
+              window.parent.postMessage({
+                source: 'sandbox-console',
+                method: 'error',
+                args: ['Unhandled Promise Rejection: ' + e.reason],
+                ts: Date.now()
+              }, '*')
+            })
           })()
             ${codeStore.jsCode}
           <\/script>
@@ -149,13 +167,15 @@
   
   // 更新展示区，感觉要加防抖
   const updatePreview = () => {
-    if (!previewFrame.value) return 
+    if (!previewFrame.value) return
+
+    logs.value = []
 
     if( language.value === 'typescript' ) {
       previewFrame.value.srcdoc = generateReactHtml();
     } else {
       previewFrame.value.srcdoc = generateFullHtml();
-    } 
+    }
 
   }
 
