@@ -7,6 +7,16 @@ export type CodeFiles = {
 }
 
 export const aiService = {
+  useAgent:(payload:{
+    userText:string,
+    currentFiles:CodeFiles,
+    selectedCode?:any,
+    history:[],
+  }) => fetch('/${BASE}/agent',{
+    method:'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:JSON.stringify(payload)
+  }).then(r => r.json()),
   getFixCode: (payload: {
     eMessage: string[],
     files: CodeFiles

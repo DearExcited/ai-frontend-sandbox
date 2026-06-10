@@ -18,6 +18,24 @@
          <div class="right action-btn"  @click="drawerVisible = true">
           <font-awesome-icon icon="fa-solid fa-list" />
         </div>
+
+        <el-tooltip content="edit模式" placement="right">
+            <div class="action-btn" @click="aiStore.openEdit()">
+              <font-awesome-icon icon="fa-solid fa-circle-nodes" />
+            </div>
+          </el-tooltip>
+
+          <el-tooltip content="agent模式" placement="right">
+            <div class="action-btn" @click="aiStore.openAgent()">
+              <font-awesome-icon icon="fa-solid fa-comments" />
+            </div>
+          </el-tooltip>
+
+          <el-tooltip :content="tipTool" placement="right">
+            <div class="action-btn" @click="toggleAutoComplete()" :class="{ active: autoOn }">
+              <font-awesome-icon icon="fa-solid fa-pen" />
+            </div>
+          </el-tooltip>
       </div>
     </div>
 
@@ -131,10 +149,13 @@
   import type { TabsPaneContext } from 'element-plus'
   import { ElDialog, ElForm, ElButton, ElFormItem, ElOption, ElSelect, ElInput, ElTabs, ElTabPane, ElMessage, ElDrawer,ElTooltip, ElMessageBox } from 'element-plus';
   import diffDialogForm from '../components/diffDialogForm.vue';
+  import { useAiStore } from '../store/useAiStore.ts';
+  const autoOn = ref(true)                                 //自动补全状态
   const dialogFormVisible = ref(false)
   const formLabelWidth = '140px'
   const proJectname = ref('')
   const codeStore = useCodeStore()
+  const aiStore = useAiStore()
   const versionDiffStore = useVersionDiffStore()
   const handleClick = (tab: TabsPaneContext, event: Event) => {
     console.log(tab, event)
@@ -148,6 +169,19 @@
   const drawerVisible = ref(false)
   const expandedProject = ref<string | null>(null)
   const versionMap = ref<Record<string, any[]>>({})
+  const tipTool = ref('自动补全已关闭') 
+
+  const toggleAutoComplete = () => {
+    tipTool.value = tipTool.value.includes('已关闭') ? '自动补全已开启' : '自动补全已关闭'
+    if (!aiStore.isEnabled) {
+      if (aiStore.editorInstance) {
+        aiStore.enableAIAssistant(aiStore.editorInstance)
+      }
+    } else {
+      aiStore.disableAIAssistant()
+    }
+    autoOn.value = !autoOn.value
+  }
 
   const toggleProject = async (id: string) => {
     if (expandedProject.value === id) {

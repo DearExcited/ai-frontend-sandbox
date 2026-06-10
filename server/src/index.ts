@@ -19,7 +19,7 @@ app.use('/api/ai', aiRouter)
 // 测试接口
 app.get('/health', (rep, res) => {
   res.json({ 
-    state:'请求成功',
+    state:'请求成功==========',
     db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   })
 })

@@ -2,47 +2,9 @@
   <div class="edtior-container">
     <!-- 编辑器核心 -->
     <div ref="editorContainer" style="height: 100%;"></div>
-    <!-- 交互按钮，启用ai功能 -->
-    <div class="editor-actions" v-if="language === 'javascript'">
-      <div class="action-btn">
-        <font-awesome-icon icon="fa-solid fa-robot"/>
-      </div>
 
-      <div class="robot-drop-menu">
-        <el-tooltip
-          content="edit模式"
-          placement="right"
-        >
-          <div class="action-btn" @click="aiStore.openEdit()">
-            <font-awesome-icon icon="fa-solid fa-circle-nodes" />
-          </div>
-        </el-tooltip>
-
-        <el-tooltip
-          content="agent模式"
-          placement="right"
-        >
-          <div class="action-btn" @click="aiStore.openAgent()">
-            <font-awesome-icon icon="fa-solid fa-comments" />
-          </div>
-        </el-tooltip>
-
-        <el-tooltip
-          :content="tipTool"
-          placement="right"
-        >
-          <div class="action-btn"
-           @click="toggleAutoComplete()"
-           :class="{ active:autoOn }"
-           >
-            <font-awesome-icon icon="fa-solid fa-pen" />
-          </div>
-        </el-tooltip>
-      </div>
-    </div>
-
-    <!-- edit模式面板 -->
-    <div class="ai-edit" :class="{ open: aiStore.aiEditOpen }">
+    <!-- edit模式面板（保持浮窗） -->
+      <div class="ai-edit" :class="{ open: aiStore.aiEditOpen }">
         <div class="talk-header">
           <span class="talk-title">AI-EDIT</span>
           <div class="aiEdit-Button">
@@ -51,75 +13,44 @@
                 <font-awesome-icon icon="fa-solid fa-rotate" />
               </button>
             </el-tooltip>
-             <el-tooltip content="还原" placement="top">
-                <button class="aiEdit-button" @click="diffStore.restoreOriginalCode(editor)">
-                  <font-awesome-icon icon="fa-solid fa-trash-can-arrow-up" />
-                </button>
-              </el-tooltip>
+            <el-tooltip content="还原" placement="top">
+              <button class="aiEdit-button" @click="diffStore.restoreOriginalCode(editor)">
+                <font-awesome-icon icon="fa-solid fa-trash-can-arrow-up" />
+              </button>
+            </el-tooltip>
             <button class="talk-close" @click="aiStore.closeEdit()">
               <font-awesome-icon icon="fa-regular fa-circle-xmark" size="xl"/>
             </button>
           </div>
         </div>
-
         <div class="talk-content">
           <div class="talk-messages" v-for="(msg, index) in aiStore.aiEditMessages" :key="index">
             {{ msg }}
           </div>
         </div>
         <div class="talk-input">
-          <input 
-            type="text" 
-            placeholder="向AI请求代码修改建议..." 
+          <input
+            type="text"
+            placeholder="向AI请求代码修改建议..."
             v-model="aiStore.aiInput"
             @keydown.ctrl.enter.prevent="handleSendEdit"
           >
-          <button 
-            class="sendMsg"
-            @click="aiStore.sendEditMsg(codeStore.getSelectedCode(editor!), editor!)"
-          >
+          <button class="sendMsg" @click="aiStore.sendEditMsg(codeStore.getSelectedCode(editor!), editor!)">
             <font-awesome-icon icon="fa-solid fa-paper-plane" />
           </button>
         </div>
-    </div>
+      </div>
 
-    <!-- agent模式面板 -->
-    <div class="ai-agent" :class="{ open: aiStore.aiAgentOpen }">
-        <div class="talk-header">
-          <span class="talk-title">AI-AGENT</span>
-          <button class="talk-close" @click="aiStore.closeAgent()">
-            <font-awesome-icon icon="fa-regular fa-circle-xmark" size="xl"/>
-          </button>
-        </div>
-        <div class="talk-content" ref="chatAgentEl">
-          <div class="talk-messages" v-for="(msg, index) in aiStore.aiAgentMessages" :key="index">
-            {{ msg }}
-          </div>
-        </div>
-        <div class="talk-input">
-          <input type="text" 
-            placeholder="向AI询问代码问题..." 
-            v-model="aiStore.aiInput"
-            @keydown.ctrl.enter.prevent="handleSendMsg"
-          >
-          
-          <button 
-            class="sendMsg" 
-            @click="aiStore.sendAgentMsg(getCurrentCode())"
-          >
-            <font-awesome-icon v-if="aiStore.isLoading" icon="fa-solid fa-play" />
-            <font-awesome-icon v-else  icon="fa-solid fa-paper-plane" />
-          </button>
-        </div>
-    </div>
+      <!-- 加载状态 -->
+      <div v-if="aiStore.isLoading" class="ai-loading">
+        <span class="loading-dot"></span>
+        AI 正在思考...
+      </div>
   </div>
-
-  <!-- 状态 -->
-  <div v-if="aiStore.isLoading" class="ai-loading">AI正在思考...</div>
 </template>
 
 <script setup lang="ts">
-  import {ref, watch, computed ,onMounted , onUnmounted, nextTick} from 'vue'
+  import {ref, watch, computed, onMounted, onUnmounted} from 'vue'
   import * as monaco from 'monaco-editor';
   import 'monaco-editor/esm/vs/language/html/monaco.contribution';
   import 'monaco-editor/esm/vs/language/css/monaco.contribution';
@@ -132,16 +63,12 @@
   const codeStore = useCodeStore()
   const diffStore = useDiffStore()
   const aiStore = useAiStore()
-  const editorContainer = ref<HTMLElement | null>(null)   //编辑器DOM元素
-  let editor: monaco.editor.IStandaloneCodeEditor | null = null  //编辑器实例
-  const chatAgentEl = ref<HTMLElement | null>(null);  // 需要控制滚动条的DOM元素，即为与ai的聊天区域
-  let autoFollow: boolean = true;
+  const editorContainer = ref<HTMLElement | null>(null)
+  let editor: monaco.editor.IStandaloneCodeEditor | null = null
 
   const props = defineProps<{
     language: 'html' | 'css' | 'javascript' | 'typescript'
   }>()                                                             //路由props，传递语言类型
-  const tipTool = ref('自动补全已关闭')                     //交互按钮提示信息
-  const autoOn = ref(true)                                 //自动补全状态
 
   // 获取当前语言的代码,用于发送ai
   const getCurrentCode = () => {
@@ -151,18 +78,6 @@
       case 'javascript': return codeStore.jsCode
       case 'typescript': return codeStore.reactCode
     }
-  } 
-
-  // 自动补全切换
-  const toggleAutoComplete = () => {
-    tipTool.value = tipTool.value.includes('已关闭')? '自动补全已开启': '自动补全已关闭'
-    // 自动补全状态切换
-    if( !aiStore.isEnabled ){
-      aiStore.enableAIAssistant(editor!)
-    } else {
-      aiStore.disableAIAssistant()
-    }
-    autoOn.value = !autoOn.value
   }
 
   // 更新store中的代码
@@ -180,38 +95,10 @@
     return props.language === 'javascript'
   })
 
-  // enter + ctrl 快捷键调用函数
+  // enter + ctrl 快捷键
   const handleSendEdit = () => {
     aiStore.sendEditMsg(codeStore.getSelectedCode(editor!), editor!)
   }
-  const handleSendMsg = () => {
-    aiStore.sendAgentMsg(getCurrentCode())
-  }
-
-  // 滚动条的逻辑，接近底部的时候自动划到底部,但如果用户上划就不再强制划到底部,用户若划到底部就重新启动自动跟随的逻辑
-  function isNearBottom(el: HTMLElement, threshold = 80): boolean {
-    return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
-  }
-
-  function scrollToBottom(): void {
-    const el = chatAgentEl.value;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }
-
-  function onScroll(): void {
-    const el = chatAgentEl.value;
-    if (!el) return;
-    autoFollow = isNearBottom(el);
-  }
-
-  watch(
-    () => aiStore.aiAgentMessages[aiStore.aiAgentMessages.length - 1],
-    async () => {
-      await nextTick();
-      if (autoFollow) scrollToBottom();
-    }
-  );
 
   // 监听 fixAction，由 consolePanel 触发确认或还原
   watch(
@@ -364,11 +251,6 @@
       if (isJSRoute.value && props.language === 'javascript' && editor) {
         aiStore.enableAIAssistant(editor);
       }
-
-      const el = chatAgentEl.value;
-      if (!el) return;
-      // 绑定滚动监听器实现智能滚动
-      el.addEventListener("scroll", onScroll);
     }
   })
 
@@ -408,35 +290,44 @@
 </script>
 
 <style scoped>
-  .ai-loading {
-    position: absolute;
-    bottom: 10px;
-    right: 10px;
-    background-color: rgba(0, 0, 0, 0.7);
-    color: white;
-    padding: 5px 10px;
-    border-radius: 4px;
-    font-size: 12px;
-    z-index: 1000;
-  }
-
   .edtior-container {
     flex: 1;
     position: relative;
+    min-width: 0;
   }
 
-  .editor-actions {
+  /* ===== AI 加载状态 ===== */
+  .ai-loading {
     position: absolute;
-    top: 15px;
-    right: 15px;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgba(0, 0, 0, 0.75);
+    color: #d4d4d4;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    z-index: 1000;
     display: flex;
-    flex-direction: column;
-    gap: 10px;
-    z-index: 10;
+    align-items: center;
+    gap: 6px;
   }
 
-  .ai-edit,
-  .ai-agent {
+  .loading-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #0078d4;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 0.3; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1); }
+  }
+
+  /* ===== AI-EDIT 浮窗（保持不变） ===== */
+  .ai-edit {
     position: absolute;
     bottom: 20px;
     right: 20px;
@@ -449,40 +340,28 @@
     display: none;
   }
 
-  /* webkit滚动条样式要写三件套 */
-  .ai-agent .talk-content,
-  .ai-edit .talk-content{
+  .ai-edit.open {
+    display: block;
+  }
+
+  .ai-edit .talk-content {
     overflow: auto;
+    padding: 16px;
+    max-height: 300px;
+    overflow-y: auto;
   }
 
-  .ai-agent .talk-content::-webkit-scrollbar,
-  .ai-edit .talk-content::-webkit-scrollbar{
-    width: 8px;
-  }
+  .ai-edit .talk-content::-webkit-scrollbar { width: 8px; }
+  .ai-edit .talk-content::-webkit-scrollbar-track { background: #252526; border-radius: 999px; }
+  .ai-edit .talk-content::-webkit-scrollbar-thumb { background: #5a5a5a; border-radius: 999px; border: 2px solid #252526; }
 
-  .ai-agent .talk-content::-webkit-scrollbar-track,
-  .ai-edit .talk-content::-webkit-scrollbar-track {
-    background: #252526;
-    border-radius: 999px;
-  }
-
-  .ai-agent .talk-content::-webkit-scrollbar-thumb,
-  .ai-edit .talk-content::-webkit-scrollbar-thumb {
-    background: #5a5a5a;
-    border-radius: 999px;
-    border: 2px solid #252526;
-  }
-
-  .ai-agent .talk-messages,
   .ai-edit .talk-messages {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
-  }
-
-  .ai-edit.open,
-  .ai-agent.open {
-    display: block;
+    margin-bottom: 12px;
+    line-height: 1.5;
+    color: #d4d4d4;
   }
 
   .talk-header {
@@ -499,16 +378,17 @@
     font-weight: 600;
   }
 
-  .aiEdit-Button{
+  .aiEdit-Button {
     display: flex;
     gap: 10px;
   }
 
-  .aiEdit-button{
+  .aiEdit-button {
     background: #252526;
     color: white;
     border-radius: 50%;
     cursor: pointer;
+    border: none;
   }
 
   .talk-close {
@@ -516,18 +396,6 @@
     border: none;
     color: #d4d4d4;
     cursor: pointer;
-  }
-
-  .talk-content {
-    padding: 16px;
-    max-height: 300px;
-    overflow-y: auto;
-  }
-
-  .talk-messages {
-    margin-bottom: 12px;
-    line-height: 1.5;
-    color: #d4d4d4;
   }
 
   .talk-input {
@@ -557,26 +425,5 @@
     padding: 8px 12px;
     color: white;
     cursor: pointer;
-  }
-
-  .robot-drop-menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    margin-top: 8px;
-    flex-direction: column;
-    gap: 10px;
-    visibility: hidden;
-    display: flex;
-    opacity: 0;
-    transform: translateY(-6px);
-    transition: all 0.2s ease;
-  }
-
-  .editor-actions:hover .robot-drop-menu,
-  .robot-drop-menu:hover {
-    visibility: visible;
-    opacity: 1;
-    transform: translateY(0);
   }
 </style>

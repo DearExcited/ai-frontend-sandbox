@@ -11,15 +11,17 @@
       <div class="right">
         <Preview></Preview>
       </div>
+      <!-- AI Agent 侧边栏，在预览区右边 -->
+      <AiAgentSidebar />
     </div>
   </div>
-
 </template>
 
 <script setup lang="ts">
-  import Preview from '../components/Preview.vue'; 
+  import Preview from '../components/Preview.vue';
   import Tabs from '../components/Tabs.vue'
   import Header from './Header.vue'
+  import AiAgentSidebar from '../components/AiAgentSidebar.vue'
 </script>
 
 <style lang="css" scoped>
@@ -45,7 +47,7 @@
     overflow: hidden;
   }
 
-  .right{
+  .right {
     overflow: hidden;
     height: 100%;
   }

@@ -11,6 +11,16 @@ export const useAiStore = defineStore('useAiStore', () => {
   // 消息类型，定义每一个发送或者接收到的消息
   type ChatMsg = { role: "system" | "user" | "assistant"; content: string }
 
+  type SSEHandlers = {
+    onToken?: (token: string) => void
+    onStage?: (data: any) => void
+    onToolCall?: (data: any) => void
+    onToolResult?: (data: any) => void
+    onFinal?: (data: any) => void
+    onDone?: () => void
+    onError?: (data: any) => void
+  }
+
   const codeStore = useCodeStore()
   // ai助手内联补全开启状态
   const isEnabled     = ref(false)
@@ -20,11 +30,12 @@ export const useAiStore = defineStore('useAiStore', () => {
   const agentHistory       = ref<ChatMsg[]>([])
   // 历史记录条数控制
   const MAX_TURNS = 10;
+  // agent消息气泡类型
+  type AgentMsg = { role: 'user' | 'assistant' | 'tool'; content: string }
+
   // ai消息
-  const aiAgentMessages    = ref<string[]>([
-    'AI助手已启用！',
-    '我可以帮助您编写更好的JavaScript代码。',
-    '请尝试问我关于代码的问题，或让我帮您优化代码。',
+  const aiAgentMessages    = ref<AgentMsg[]>([
+    { role: 'assistant', content: 'AI助手已启用！我可以帮助您编写更好的 JavaScript 代码，请尝试向我提问或让我优化代码。' },
   ])
   const aiEditMessages = ref<string[]>([
     'AI助手已起用！',
@@ -38,6 +49,8 @@ export const useAiStore = defineStore('useAiStore', () => {
   const aiAgentOpen   = ref(false)
   // 内联补全mocnoc需要的结果
   const lastSession   = ref<languages.InlineCompletions<languages.InlineCompletion> | null>(null)
+  // 保存编辑器实例，供外部（如 Header）调用
+  const editorInstance = ref<monaco.editor.IStandaloneCodeEditor | null>(null)
   // 保存内联补全提供器变量,方便卸载
   const provider      = ref<monaco.IDisposable | null>(null)
   // 防抖与节流
@@ -108,72 +121,132 @@ export const useAiStore = defineStore('useAiStore', () => {
     // 消息清除末尾空格
     const userText = aiInput.value.trim();
     // 加入消息队列
-    aiAgentMessages.value.push(`User: ${userText}`);
-    // 聊天框的滚动条交互
-    const aiContent = document.querySelector('.talk-content');
-    if (aiContent) aiContent.scrollTop = aiContent.scrollHeight;
+    aiAgentMessages.value.push({ role: 'user', content: userText });
 
     // 发送后
     aiInput.value = '';
     isLoading.value = true;
 
-    // SSM打字机效果
     // 先插入占位消息，后续不断改它，每次更新的都是同一条消息，而不是push新消息
-    const aiIndex = aiAgentMessages.value.length;
-    aiAgentMessages.value.push(`AI助手: `);
+    const assistantIndex = aiAgentMessages.value.length;
+    aiAgentMessages.value.push({ role: 'assistant', content: '正在处理...' });
 
-    // 用 rAF 做一下节流，token 很碎时不会卡
-    let pending = "";       //暂存区，用来存储还没有渲染到页面上的token
-    let raf = 0;
-    let aiAgentText = "";       //已经渲染到页面上的token
-    // 负责更新页面的函数
-    const flush = () => {
-      aiAgentMessages.value[aiIndex] = `AI助手: ${aiAgentText}`;    //更新消息列表
-      if (aiContent) aiContent.scrollTop = aiContent.scrollHeight;    //滚动条滚动
-      raf = 0;        //表示这一帧更新结束
-    };
+    // // 用 rAF 做一下节流，token 很碎时不会卡
+    // let pending = "";       //暂存区，用来存储还没有渲染到页面上的token
+    // let raf = 0;
+    // let aiAgentText = "";       //已经渲染到页面上的token
+    // // 负责更新页面的函数
+    // const flush = () => {
+    //   aiAgentMessages.value[aiIndex] = `AI助手: ${aiAgentText}`;    //更新消息列表
+    //   if (aiContent) aiContent.scrollTop = aiContent.scrollHeight;    //滚动条滚动
+    //   raf = 0;        //表示这一帧更新结束
+    // };
 
     try {
       // 终止上一次
-      agentAbort.value?.abort();
-      agentAbort.value = new AbortController();
+      // agentAbort.value?.abort();
+      // agentAbort.value = new AbortController();
 
-      const messages = buildAgentMsg(codeContext, userText);
+      // const messages = buildAgentMsg(codeContext, userText);
 
       await fetchSSEStream(
-        "/api/chat/completions",
+        "/backend/api/ai/agent",
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: "Bearer sk-IT2HedPEUDo4yfBTYEH0dhZ3SlPYeZoMM5QKeKFiTmyaslRP",
           },
-          signal: agentAbort.value.signal,
           body: JSON.stringify({
-            model: "moonshot-v1-8k",
-            stream: true,       //流式
-            messages,
-            max_tokens: 200,
-            temperature: 0.7,
+            userText,
+            codeContext,
+
+            currentFiles: {
+              html: codeStore.htmlCode,
+              css: codeStore.cssCode,
+              javascript: codeStore.jsCode,
+            },
+            reactCode:codeStore.reactCode,
+            selectedCode: '',
+            history: agentHistory.value.slice(-10),
           }),
         },
-        (token) => {
-          // 打字机：token 到就追加
-          pending += token;
-          if (!raf) {
-            // 让浏览器在下一帧统一更新一次
-            raf = requestAnimationFrame(() => {
-              aiAgentText += pending;
-              pending = "";
-              flush();
-            });
-          }
+        // (token) => {
+        //   // 打字机：token 到就追加
+        //   pending += token;
+        //   if (!raf) {
+        //     // 让浏览器在下一帧统一更新一次
+        //     raf = requestAnimationFrame(() => {
+        //       aiAgentText += pending;
+        //       pending = "";
+        //       flush();
+        //     });
+        //   }
+        // }
+        {
+          onStage(data) {
+            aiAgentMessages.value[assistantIndex] = { role: 'assistant', content: data.text }
+          },
+          onToolCall(data) {
+            aiAgentMessages.value.push({
+              role: 'tool',
+              content: `⚙️ 调用工具: ${data.name}\n参数: ${JSON.stringify(data.arguments, null, 2)}`,
+            })
+          },
+          onToolResult(data){
+            aiAgentMessages.value.push({
+              role: 'tool',
+              content: `✅ 工具完成: ${data.name}，耗时 ${data.elapsedMs ?? 0}ms`,
+            })
+
+            if (data.name === 'fix_error'){
+              const fixedFiles = data.result?.fixedFiles
+
+              if(fixedFiles){
+                pendingFix.value = {
+                  html: fixedFiles.html ?? codeStore.htmlCode,
+                  css: fixedFiles.css ?? codeStore.cssCode,
+                  javascript: fixedFiles.javascript ?? codeStore.jsCode,
+                }
+
+                aiAgentMessages.value.push({
+                  role: 'assistant',
+                  content: '已生成修复代码，请确认是否应用。',
+                })
+              }
+            }
+
+            if(data.name === 'generate_component'){
+              const newComponent = data.result?.reactCode
+              if(newComponent){
+                codeStore.reactCode = newComponent
+              }
+
+              aiAgentMessages.value.push({
+                role: 'assistant',
+                content: '已生成组件代码，请确认是否应用。',
+              })
+            }
+          },
+
+          onFinal(data) {
+            aiAgentMessages.value[assistantIndex] = { role: 'assistant', content: data.content || '处理完成' }
+          },
+
+          onError(data) {
+            aiAgentMessages.value[assistantIndex] = { role: 'assistant', content: `处理失败：${data.message || '未知错误'}` }
+          },
+
+          onDone() {
+            console.log('Agent 流程结束')
+          },
         }
       );
 
+      const assistantText = aiAgentMessages.value[assistantIndex].content
+
       // ai历史消息队列
       agentHistory.value.push({ role: "user", content: userText });
-      agentHistory.value.push({ role: "assistant", content: aiAgentText });
+      agentHistory.value.push({ role: "assistant", content: assistantText });
 
       // 定量清理历史消息
       if (agentHistory.value.length > MAX_TURNS * 2) {
@@ -181,12 +254,15 @@ export const useAiStore = defineStore('useAiStore', () => {
       }
 
     } catch (error: any) {  //错误处理
-      if (error?.name === "AbortError") {
-        aiAgentMessages.value[aiIndex] = `AI助手: （已停止生成）${aiAgentText}`;
-      } else {
-        console.error("发送消息失败:", error);
-        aiAgentMessages.value[aiIndex] = "AI助手: 抱歉，处理您的请求时出现了问题。";
-      }
+      // if (error?.name === "AbortError") {
+      //   aiAgentMessages.value[aiIndex] = `AI助手: （已停止生成）${aiAgentText}`;
+      // } else {
+      //   console.error("发送消息失败:", error);
+      //   aiAgentMessages.value[aiIndex] = "AI助手: 抱歉，处理您的请求时出现了问题。";
+      // }
+
+      console.error(error)
+      aiAgentMessages.value[assistantIndex] = { role: 'assistant', content: '请求失败，请检查后端服务。' }
     } finally {         //状态管理
       isLoading.value = false;
     }
@@ -224,7 +300,7 @@ export const useAiStore = defineStore('useAiStore', () => {
       if (aiContent) aiContent.scrollTop = aiContent.scrollHeight
     } catch (error) {
       console.error('发送消息失败:', error)
-      aiAgentMessages.value.push('AI助手: 抱歉，处理您的请求时出现了问题。')
+      aiEditMessages.value.push('AI助手: 抱歉，处理您的请求时出现了问题。')
     } finally {
       isLoading.value = false
     }
@@ -232,12 +308,10 @@ export const useAiStore = defineStore('useAiStore', () => {
 
     // 启动ai功能
   function enableAIAssistant(editor: monaco.editor.IStandaloneCodeEditor) {
-    // 如果提供器中有东西，先将其卸载
     if (provider) {
       disableAIAssistant();
     }
-
-    // 状态管理
+    editorInstance.value = editor
     isEnabled.value = true;
     registerAIProvider(editor);
     // 启用编辑器实例的行内建议
@@ -247,14 +321,12 @@ export const useAiStore = defineStore('useAiStore', () => {
 
     // 禁用AI功能
   function disableAIAssistant() {
-      if (provider.value) {
-        // 卸载并还原
-        provider.value?.dispose();
-        provider.value = null;
-      }
-
-      // 状态管理
-      isEnabled.value = false;
+    if (provider.value) {
+      provider.value?.dispose();
+      provider.value = null;
+    }
+    editorInstance.value = null
+    isEnabled.value = false;
       lastSession.value = null;
       console.log('ai禁用了')
   }
@@ -376,7 +448,7 @@ export const useAiStore = defineStore('useAiStore', () => {
   async function fetchSSEStream(
     url: string,
     fetchInit: RequestInit,
-    onToken: (t: string) => void,
+    handlers: SSEHandlers,
   ) {
     // 发送请求并检查响应体
     const resp = await fetch(url, fetchInit);
@@ -410,31 +482,75 @@ export const useAiStore = defineStore('useAiStore', () => {
 
       //处理每一个SSE事件
       for (const part of parts) {
-        // 可能有多行：event: ... / id: ... / data: ...
-        const lines = part.split("\n");
-        for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
+        const lines = part.split('\n')
 
-          const dataStr = line.slice(5).trim();
-          if (!dataStr) continue;
+        let event = 'message'
+        const dataLines: string[] = []
 
-          if (dataStr === "[DONE]") {
-            done = true;
-            break;
-          }
+        for (const rawLine of lines) {
+          const line = rawLine.replace(/\r$/, '')
 
-          try {
-            // 把json换成对象
-            const json = JSON.parse(dataStr);
-            // 提取真正的文本
-            const t = extractDeltaText(json);
-            if (t) onToken(t);
-          } catch {
-            // 有些实现 data: 直接推文本
-            onToken(dataStr);
+          if (line.startsWith('event:')) {
+            event = line.slice(6).trim()
+          } else if (line.startsWith('data:')) {
+            dataLines.push(line.slice(5).trim())
           }
         }
-        if (done) break;
+
+        const dataStr = dataLines.join('\n')
+
+        if (!dataStr) continue
+
+        if (dataStr === '[DONE]') {
+          done = true
+          handlers.onDone?.()
+          break
+        }
+
+        let data: any
+
+        try {
+          data = JSON.parse(dataStr)
+        } catch {
+          data = dataStr
+        }
+
+        switch (event) {
+          case 'stage':
+            handlers.onStage?.(data)
+            break
+
+          case 'tool_call':
+            handlers.onToolCall?.(data)
+            break
+
+          case 'tool_result':
+            handlers.onToolResult?.(data)
+            break
+
+          case 'final':
+            handlers.onFinal?.(data)
+            break
+
+          case 'done':
+            done = true
+            handlers.onDone?.()
+            break
+
+          case 'error':
+            handlers.onError?.(data)
+            break
+
+          case 'message':
+          default: {
+            if (typeof data === 'string') {
+              handlers.onToken?.(data)
+            } else {
+              const token = extractDeltaText(data)
+              if (token) handlers.onToken?.(token)
+            }
+          }
+        }
       }
     }
   }
@@ -557,6 +673,7 @@ async function fixByAi (eMessage: string[]){
    return {
     isEnabled,
     isLoading,
+    editorInstance,
     agentHistory,
     MAX_TURNS,
     aiAgentMessages,
