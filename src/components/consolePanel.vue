@@ -7,11 +7,11 @@
 
       <div class="bar-actions">
         <!-- 有待确认的修复时显示确认/还原按钮 -->
-        <template v-if="aiStore.pendingFix">
+        <template v-if="aiStore.pendingChanges">
           <el-button size="small" type="success" @click="confirmFix">应用修复</el-button>
           <el-button size="small" @click="revertFix">还原</el-button>
         </template>
-        <el-button v-else size="small" type="warning" @click="handleFixError" :loading="aiStore.isLoading">
+        <el-button v-else size="small" type="warning" @click="handleFixError" :loading="fixLoading">
           一键修复
         </el-button>
         <div class="action" @click="toggleConsole()">
@@ -43,14 +43,26 @@
 
 <script setup lang="ts" name="consolePanel">
   import { ElButton, ElMessage } from 'element-plus';
-  import { ref } from 'vue';
+  import { ref, watch } from 'vue';
   import { useAiStore } from '../store/useAiStore';
   type LogItem = { id: string; type: 'log'|'warn'|'error'|'info'; text: string; ts: number };
   const isOpen = ref(false);
+  const fixLoading = ref(false)
   const aiStore = useAiStore()
   const props = defineProps<{
     logs: LogItem[]
   }>()
+
+  // 同步 error logs 到 store，agent 发消息时可以带上
+  watch(
+    () => props.logs,
+    (logs) => {
+      aiStore.consoleLogs = logs
+        .filter(item => item.type === 'error')
+        .map(item => item.text)
+    },
+    { deep: true }
+  )
 
   function toggleConsole(){
     isOpen.value = !isOpen.value;
@@ -66,17 +78,21 @@
       return
     }
 
-    await aiStore.fixByAi(eMessage)
+    fixLoading.value = true
+    try {
+      await aiStore.fixByAi(eMessage)
+    } finally {
+      fixLoading.value = false
+    }
   }
 
   const confirmFix = () => {
-    if (!aiStore.pendingFix) return
-    aiStore.fixAction = 'confirm'
+    aiStore.applyAllChanges()
     ElMessage.success('已应用修复')
   }
 
   const revertFix = () => {
-    aiStore.fixAction = 'revert'
+    aiStore.revertAllChanges()
     ElMessage.info('已还原')
   }
 </script>

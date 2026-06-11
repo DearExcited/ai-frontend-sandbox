@@ -48,9 +48,41 @@
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
         </div>
       </div>
+
+      <!-- 待确认的代码修改 -->
+      <div v-if="aiStore.pendingChanges && !aiStore.isLoading" class="fix-actions">
+        <span class="fix-hint">AI 已生成修改，是否应用？</span>
+        <div class="fix-buttons">
+          <button class="fix-btn fix-btn--confirm" @click="applyFix">
+            <font-awesome-icon icon="fa-solid fa-check" />
+            应用
+          </button>
+          <button class="fix-btn fix-btn--revert" @click="revertFix">
+            <font-awesome-icon icon="fa-solid fa-xmark" />
+            撤销
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- 输入区 -->
+      <input
+        ref="imageInput"
+        type="file"
+        accept="image/*"
+        hidden
+        @change="handleImageSelect"
+      />
+
+      <button
+        class="upload-btn"
+        @click="imageInput?.click()"
+      >
+        <font-awesome-icon
+          icon="fa-regular fa-image"
+      />
+      </button>
+
     <div class="sidebar-input">
       <textarea
         placeholder="向 AI 询问代码问题... (Ctrl+Enter 发送)"
@@ -79,14 +111,48 @@ const codeStore = useCodeStore()
 const chatAgentEl = ref<HTMLElement | null>(null)
 let autoFollow = true
 
+const imageInput = ref<HTMLInputElement>()
+
+const handleImageSelect = (
+    e: Event
+  ) => {
+    const file =
+      (e.target as HTMLInputElement)
+        .files?.[0]
+
+    if (!file) return
+
+    const reader = new FileReader()
+
+    reader.onload = () => {
+      aiStore.aiInputImg =
+        reader.result as string
+    }
+
+    console.log(aiStore.aiInputImg)
+
+    reader.readAsDataURL(file)
+  }
+
 const sendMsg = () => {
+  if (!aiStore.aiInput && ! aiStore.aiInputImg) return
   const ctx = [
     codeStore.htmlCode,
     codeStore.cssCode,
     codeStore.jsCode,
     codeStore.reactCode,
   ].filter(Boolean).join('\n\n')
-  aiStore.sendAgentMsg(ctx)
+  aiStore.sendAgentMsg(ctx, aiStore.aiInputImg)
+  aiStore.aiInput = ''
+  aiStore.aiInputImg = ''
+}
+
+const applyFix = () => {
+  aiStore.applyAllChanges()
+}
+
+const revertFix = () => {
+  aiStore.revertAllChanges()
 }
 
 function isNearBottom(el: HTMLElement, threshold = 80) {
@@ -329,4 +395,56 @@ watch(
 }
 .send-btn:hover:not(:disabled) { background: #106ebe; }
 .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.fix-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 8px;
+}
+
+.fix-hint {
+  font-size: 12px;
+  color: #858585;
+}
+
+.fix-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.fix-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 0;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.fix-btn--confirm {
+  background: #0078d4;
+  color: #fff;
+}
+.fix-btn--confirm:hover { background: #106ebe; }
+
+.fix-btn--revert {
+  background: #3c3c3c;
+  color: #d4d4d4;
+  border: 1px solid #555;
+}
+.fix-btn--revert:hover { background: #4a4a4a; }
+
+.msg-image img {
+  max-width: 180px;
+  border-radius: 8px;
+}
 </style>

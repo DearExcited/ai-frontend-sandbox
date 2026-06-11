@@ -17,5 +17,6 @@ export type FrontendFiles = {
 export type AgentContext = {
   currentFiles?: FrontendFiles
   selectedCode?: string
-  reactCode?:string
+  reactCode?: string
+  image?: string
 }

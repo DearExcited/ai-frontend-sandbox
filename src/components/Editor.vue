@@ -100,7 +100,7 @@
     aiStore.sendEditMsg(codeStore.getSelectedCode(editor!), editor!)
   }
 
-  // 监听 fixAction，由 consolePanel 触发确认或还原
+  // 监听 fixAction：当前 tab 的编辑器执行应用或撤销，然后清空 pendingChanges
   watch(
     () => aiStore.fixAction,
     (action) => {
@@ -108,23 +108,23 @@
       if (action === 'confirm') {
         diffStore.replaceCode(editor)
       } else if (action === 'revert') {
-        diffStore.restoreOriginalCode(editor)
+        diffStore.restoreFullCode(editor)
       }
       aiStore.fixAction = null
-      aiStore.pendingFix = null
+      aiStore.pendingChanges = null
     }
   )
 
-  // 监听 pendingFix，有修复结果时针对当前语言执行 processFullDiff
+  // 监听 pendingChanges 或语言切换：对当前 tab 执行 diff
   watch(
-    () => aiStore.pendingFix,
-    (fix) => {
-      if (!fix || !editor) return
-      const key = props.language as keyof typeof fix
-      const fixedCode = fix[key]
-      if (!fixedCode) return
-      const currentCode = getCurrentCode()
-      diffStore.processFullDiff(editor, currentCode, fixedCode)
+    [() => aiStore.pendingChanges, () => props.language],
+    () => {
+      const changes = aiStore.pendingChanges
+      if (!changes || !editor) return
+      const key = props.language as keyof typeof changes
+      const newCode = changes[key]
+      if (!newCode) return
+      diffStore.processFullDiff(editor, getCurrentCode(), newCode)
     }
   )
 
@@ -245,7 +245,6 @@
           updateStoreCode(editor.getValue())
         }
       });
-      codeStore.setHtmlCode(editor.getValue());
 
       // 处在js路由时起用ai功能
       if (isJSRoute.value && props.language === 'javascript' && editor) {

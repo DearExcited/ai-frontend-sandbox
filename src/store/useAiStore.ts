@@ -9,7 +9,7 @@ import { useCodeStore } from "./useCodeStore";
 import { ElMessage } from "element-plus";
 export const useAiStore = defineStore('useAiStore', () => {
   // 消息类型，定义每一个发送或者接收到的消息
-  type ChatMsg = { role: "system" | "user" | "assistant"; content: string }
+  type ChatMsg = { role: "system" | "user" | "assistant"; content: string ; img?:string }
 
   type SSEHandlers = {
     onToken?: (token: string) => void
@@ -21,6 +21,8 @@ export const useAiStore = defineStore('useAiStore', () => {
     onError?: (data: any) => void
   }
 
+  const aiInputImg = ref<string>('')
+
   const codeStore = useCodeStore()
   // ai助手内联补全开启状态
   const isEnabled     = ref(false)
@@ -31,7 +33,7 @@ export const useAiStore = defineStore('useAiStore', () => {
   // 历史记录条数控制
   const MAX_TURNS = 10;
   // agent消息气泡类型
-  type AgentMsg = { role: 'user' | 'assistant' | 'tool'; content: string }
+  type AgentMsg = { role: 'user' | 'assistant' | 'tool'; content: string; img?:string }
 
   // ai消息
   const aiAgentMessages    = ref<AgentMsg[]>([
@@ -59,12 +61,16 @@ export const useAiStore = defineStore('useAiStore', () => {
   // 防抖
   const getAICompletionDebounced = debounceAsync(getAICompletion, 500)
 
-  // console 一键修复的待确认状态
-  const pendingFix = ref<{
-    html: string
-    css: string
-    javascript: string
+  const pendingChanges = ref<{
+    html?: string
+    css?: string
+    javascript?: string
+    typescript?: string
   } | null>(null)
+
+  // console 错误日志，由 consolePanel 同步过来
+  const consoleLogs = ref<string[]>([])
+
   // 'confirm' 触发 replaceCode，'revert' 触发 restoreOriginalCode，null 表示无操作
   const fixAction = ref<'confirm' | 'revert' | null>(null)
 
@@ -114,14 +120,18 @@ export const useAiStore = defineStore('useAiStore', () => {
   }
 
   // 发送消息异步函数
-  async function sendAgentMsg(codeContext: string) {
+  async function sendAgentMsg(codeContext: string, img?:string) {
     // 文本框中消息检查
-    if (!aiInput.value.trim()) return;
+    if (!aiInput.value.trim() && !img) return;
 
-    // 消息清除末尾空格
-    const userText = aiInput.value.trim();
+    // 消息清除末尾空格,若只发图片就用图片文本占位
+    const userText = aiInput.value.trim() || '[图片]';
     // 加入消息队列
-    aiAgentMessages.value.push({ role: 'user', content: userText });
+    aiAgentMessages.value.push({
+      role: 'user',
+      content: userText,
+      img
+    });
 
     // 发送后
     aiInput.value = '';
@@ -158,8 +168,9 @@ export const useAiStore = defineStore('useAiStore', () => {
           },
           body: JSON.stringify({
             userText,
+            image: img,
             codeContext,
-
+            consoleLogs: consoleLogs.value,
             currentFiles: {
               html: codeStore.htmlCode,
               css: codeStore.cssCode,
@@ -202,7 +213,7 @@ export const useAiStore = defineStore('useAiStore', () => {
               const fixedFiles = data.result?.fixedFiles
 
               if(fixedFiles){
-                pendingFix.value = {
+                pendingChanges.value = {
                   html: fixedFiles.html ?? codeStore.htmlCode,
                   css: fixedFiles.css ?? codeStore.cssCode,
                   javascript: fixedFiles.javascript ?? codeStore.jsCode,
@@ -218,7 +229,25 @@ export const useAiStore = defineStore('useAiStore', () => {
             if(data.name === 'generate_component'){
               const newComponent = data.result?.reactCode
               if(newComponent){
-                codeStore.reactCode = newComponent
+                pendingChanges.value = {
+                  typescript: newComponent,
+                }
+              }
+
+              aiAgentMessages.value.push({
+                role: 'assistant',
+                content: '已生成组件代码，请确认是否应用。',
+              })
+            }
+
+            if(data.name === 'image_to_code'){
+              const newCode = data.result?.files
+              if(newCode){
+                pendingChanges.value = {
+                  html: newCode.html,
+                  css: newCode.css,
+                  javascript: newCode.javascript
+                }
               }
 
               aiAgentMessages.value.push({
@@ -398,10 +427,10 @@ export const useAiStore = defineStore('useAiStore', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${import.meta.env.VITE_MOONSHOT_API_KEY}`,
+            Authorization: `Bearer ${import.meta.env.VITE_DEEPSEEK_API_KEY}`,
           },
           body: JSON.stringify({
-            model: 'moonshot-v1-8k',
+            model: 'deepseek-chat',
             messages: [
               {
                 role: 'system',
@@ -652,7 +681,7 @@ async function fixByAi (eMessage: string[]){
       return
   }
   const fixedFiles = res.data.fixedFiles
-  pendingFix.value = {
+  pendingChanges.value = {
     html: fixedFiles.html,
     css: fixedFiles.css,
     javascript: fixedFiles.javascript,
@@ -664,6 +693,15 @@ async function fixByAi (eMessage: string[]){
     isLoading.value = false
   }
 }
+
+  function applyAllChanges() {
+    if (!pendingChanges.value) return
+    fixAction.value = 'confirm'
+  }
+
+  function revertAllChanges() {
+    fixAction.value = 'revert'
+  }
 
 
    onUnmounted(() => {
@@ -685,6 +723,12 @@ async function fixByAi (eMessage: string[]){
     provider,
     debounceTimers,
     throttleFlags,
+    pendingChanges,
+    consoleLogs,
+    fixAction,
+    aiInputImg,
+    applyAllChanges,
+    revertAllChanges,
     openEdit,
     closeEdit,
     openAgent,
@@ -694,8 +738,6 @@ async function fixByAi (eMessage: string[]){
     enableAIAssistant,
     disableAIAssistant,
     buildAgentMsg,
-    pendingFix,
-    fixAction,
     fixByAi,
   }
 })

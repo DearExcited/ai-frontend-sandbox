@@ -111,6 +111,13 @@ export async function runGenerateComponent(
   3. reactCode 必须是完整 React 代码，不要只返回片段。
   4. 如果当前 React 代码为空，请从零生成完整可运行的 React 组件。
   5. 如果当前 React 代码不为空，并且用户要求修改，请基于当前代码修改。
+
+         【重要】沙箱运行环境限制，生成的 React 代码必须遵守：
+        - 禁止使用 import / export 语句，React 已通过 UMD CDN 注入为全局变量
+        - 可直接使用 React、ReactDOM 以及已解构的 hooks：useState、useEffect、useRef、useCallback、useMemo
+        - 组件必须定义为 const App = () => { ... }，渲染入口固定为 App
+        - 可以在 App 内部定义子组件，或在 App 之前定义后在 App 中使用
+
         `.trim(),
       },
       {
@@ -135,4 +142,78 @@ export async function runGenerateComponent(
     ])
 
   return extractJson(aiText)
+}
+
+export async function runImageToCode(args:any, context: AgentContext) {
+  const { instruction } = args
+  // 图片优先从 context 取（前端直接传），args.image 作为备选
+  const image = context.image || args.image
+
+  if (!image) {
+    throw new Error('image_to_code 缺少图片')
+  }
+
+  const res = await fetch("https://api.moonshot.cn/v1/chat/completions",{
+    method:'POST',
+    headers: {
+      "Authorization": `Bearer ${process.env.MOONSHOT_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body:JSON.stringify({
+      model: "moonshot-v1-32k-vision-preview",
+      messages:[
+        {
+          role: "system",
+          content: `
+            你是前端专家。
+            用户会提供图片与描述，请你根据用户描述与图片内容尽可能还原页面。
+            你必须只返回 JSON，不要返回 Markdown，不要返回代码块。
+
+            返回格式必须是：
+            {
+              "files": {
+                "html": "html代码",
+                "css": "css代码",
+                "javascript": "js代码"
+              },
+              "explanation": "简短介绍你生成的页面"
+            }
+
+            要求：
+            - 语义化 HTML
+            - 尽量还原布局
+            - 使用现代 CSS
+            - 不要解释，只输出 JSON
+          `.trim()
+        },
+         {
+          role: "user",
+          content: [
+            {
+              type: "image_url",
+              image_url: {
+                url: image
+              }
+            },
+            {
+              type: "text",
+              text: instruction || "还原这个页面"
+            }
+          ]
+        }
+      ],
+      temperature: 0.2
+    })
+  })
+
+  const data = await res.json()
+
+  console.log(data)
+
+  const content =
+  data.choices?.[0]?.message?.content || ""
+
+  console.log(content)
+
+  return extractJson(content)
 }

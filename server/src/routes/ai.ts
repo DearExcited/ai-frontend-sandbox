@@ -2,7 +2,7 @@ import express from 'express'
 import type { Request, Response } from 'express'
 import { extractJson } from '../utils/extractJson.js'
 import { AI_TOOLS } from '../ai/toolSchemas.js'
-import { runFixErrorTool, runGenerateComponent } from '../ai/toolExecutors.js'
+import { runFixErrorTool, runGenerateComponent, runImageToCode } from '../ai/toolExecutors.js'
 import type { AgentContext } from '../ai/type.js'
 const router = express.Router()
 
@@ -71,7 +71,7 @@ async function callAiRaw(
 ) {
   // ai请求体
   const body: any = {
-    model: 'moonshot-v1-8k',
+    model: 'deepseek-chat',
     messages,
     temperature: options.temperature ?? 0.3,
     max_tokens: options.max_tokens ?? 2000,
@@ -90,11 +90,11 @@ async function callAiRaw(
     body.stream = true
   }
 
-  const response = await fetch('https://api.moonshot.cn/v1/chat/completions',{
+  const response = await fetch('https://api.deepseek.com/chat/completions',{
     method:'POST',
     headers:{
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.MOONSHOT_API_KEY}`,
+      Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
     },
     body: JSON.stringify(body),
   })
@@ -325,6 +325,9 @@ async function runToolByName(
     case 'generate_component':
       return runGenerateComponent(args, context)
 
+    case 'image_to_code' :
+      return runImageToCode(args, context)
+      
     default:
       throw new Error(`未知工具：${toolName}`)
   }
@@ -338,9 +341,11 @@ router.post('/agent', async (req: Request, res: Response) => {
   try{
     const {
       userText,
+      image,
       currentFiles,
       selectedCode,
       reactCode,
+      consoleLogs = [],
       history = [],
     } = req.body
 
@@ -358,6 +363,17 @@ router.post('/agent', async (req: Request, res: Response) => {
       text: '正在分析是否需要调用工具...',
     })
 
+    // 用户消息：有图片时构造 multimodal content
+    const userMessage: AiMessage = image
+      ? {
+          role: 'user',
+          content: [
+            { type: 'text', text: '[图片]' },
+            { type: 'text', text: userText },
+          ] as any,
+        }
+      : { role: 'user', content: userText }
+
      const messages: AiMessage[] = [
       {
         role: 'system',
@@ -369,16 +385,19 @@ router.post('/agent', async (req: Request, res: Response) => {
         1. 如果用户要求生成、修改、添加 React 组件，优先调用 generate_component。
         2. 如果用户提供报错、运行异常、按钮无反应、控制台错误，优先调用 fix_error。
         3. 如果用户只是问代码含义，可以直接回答，不一定调用工具。
-        4. 当前项目是 React 代码环境，生成组件时应返回完整可运行的 React 代码。
+        4. 如果当前项目是 React 代码环境，生成组件时应返回完整可运行的 React 代码。
+        5. 如果用户上传了图片并要求还原页面或参考设计稿，调用 image_to_code。
 
         如果只是普通问题，可以直接回答。
+
+        ${consoleLogs.length > 0
+          ? `【当前控制台错误信息】\n${consoleLogs.map((e: string, i: number) => `${i + 1}. ${e}`).join('\n')}`
+          : '【当前控制台无错误】'
+        }
                 `.trim(),
               },
         ...history,
-         {
-          role: 'user',
-          content: userText,
-        },
+        userMessage,
       ]
 
       const firstData = await callAiRaw(messages, {
@@ -423,6 +442,7 @@ router.post('/agent', async (req: Request, res: Response) => {
           currentFiles,
           reactCode,
           selectedCode,
+          image,
         }
 
         const result = await runToolByName(toolName, args, context)
@@ -447,16 +467,21 @@ router.post('/agent', async (req: Request, res: Response) => {
       // 所有工具执行完后，统一生成最终回复
       sendSSE(res, 'stage', { text: '工具执行完成，正在生成最终回复...' })
 
-      const secondData = await callAiRaw(messages, {
-        temperature: 0.3,
-        max_tokens: 800,
-      })
+      // image_to_code 结果不需要 DeepSeek 二次总结，直接告知用户
+      const hasImageToCode = toolCalls.some((t: ToolCall) => t.function.name === 'image_to_code')
 
-      const finalText =
-        secondData.choices?.[0]?.message?.content ||
-        '已完成，结果已进入 Diff 确认流程。'
-
-      sendSSE(res, 'final', { content: finalText })
+      if (hasImageToCode) {
+        sendSSE(res, 'final', { content: '已根据图片生成代码，请确认是否应用。' })
+      } else {
+        const secondData = await callAiRaw(messages, {
+          temperature: 0.3,
+          max_tokens: 800,
+        })
+        const finalText =
+          secondData.choices?.[0]?.message?.content ||
+          '已完成，结果已进入 Diff 确认流程。'
+        sendSSE(res, 'final', { content: finalText })
+      }
       sendSSE(res, 'done', {})
       res.end()
 

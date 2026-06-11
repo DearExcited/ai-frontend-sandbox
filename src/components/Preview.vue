@@ -80,7 +80,6 @@
     }
   }
 
-  // 代码模板插入到沙箱中
   const generateReactHtml = () => {
     const compiledJs = compileTsx(codeStore.reactCode);
 
@@ -97,7 +96,7 @@
         <body>
           <div id="root"></div>
           <script>
-            const { useState, useEffect } = React;
+            const { useState, useEffect, useRef, useCallback, useMemo } = React;
             try {
               ${compiledJs}
               const root = ReactDOM.createRoot(document.getElementById('root'));

@@ -1,3 +1,4 @@
+import { describe } from 'node:test'
 import type { AiTool } from './type.js'
 
 export const AI_TOOLS: AiTool[] =[
@@ -67,5 +68,26 @@ export const AI_TOOLS: AiTool[] =[
         },
       },
     },
+  },
+  {
+    type: "function",
+    function: {
+      name: "image_to_code",
+      description: "根据用户上传的页面截图与描述，生成对应的 HTML、CSS 和 JavaScript 代码。当用户上传图片并要求还原页面、参考设计稿、截图转代码时调用。",
+      parameters: {
+        type: "object",
+        properties: {
+          instruction: {
+            type: "string",
+            description: "用户的需求描述，例如：还原这个页面 / 参考这个设计稿生成组件 / 分析UI布局"
+          },
+          image: {
+            type: "string",
+            description: "用户上传的页面截图，base64 格式的 data URL 或图片链接"
+          }
+        },
+        required: ["instruction"]
+      }
+    }
   }
 ]

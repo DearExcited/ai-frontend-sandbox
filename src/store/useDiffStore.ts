@@ -326,8 +326,29 @@ function computeLineLevelDiff(
     applyDiffToEditorAtPosition(editor, diffResultData, 1)
     editor.updateOptions({ readOnly: true })
     isDiffMode.value = true
-
     return diffResultData
+  }
+
+  // 完整文件还原 - 对应 processFullDiff，直接用 originalCode 覆盖整个文件
+  function restoreFullCode(editor: monaco.editor.IStandaloneCodeEditor | null) {
+    if (!editor) return
+
+    const model = editor.getModel()
+    if (!model) return
+
+    const totalLines = model.getLineCount()
+    const fullRange = new monaco.Range(1, 1, totalLines, model.getLineMaxColumn(totalLines))
+
+    editor.updateOptions({ readOnly: false })
+    editor.executeEdits('restore-full', [{
+      range: fullRange,
+      text: originalCode.value,
+      forceMoveMarkers: true
+    }])
+
+    diffDecorations.value = editor.deltaDecorations(diffDecorations.value, [])
+    isDiffMode.value = false
+    currentSelection.value = null
   }
 
   // 保存源代码
@@ -465,6 +486,7 @@ function computeLineLevelDiff(
     replaceCode,
     saveOriginalCode,
     restoreOriginalCode,
+    restoreFullCode,
     computeLineLevelDiff,
     formatDiffWithColors,
     applyDiffToEditorAtPosition,
