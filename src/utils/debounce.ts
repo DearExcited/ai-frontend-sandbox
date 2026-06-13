@@ -18,3 +18,14 @@ export function debounceAsync<T extends (...args: any[]) => Promise<any>>(
     });
   };
 }
+
+export function debounce<T extends (...args: any[]) => void>(fn: T, delay: number) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  
+  return function (...args: Parameters<T>) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      fn(...args); // 准时执行
+    }, delay);
+  };
+}

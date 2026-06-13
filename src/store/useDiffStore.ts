@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref } from 'vue';
+import { ref, toRaw } from 'vue';
 import * as monaco from 'monaco-editor';
 
 // 定义DiffLine类型
@@ -21,18 +21,39 @@ export interface DiffResult {
   stats: DiffStats;
 }
 
+type pendingChanges = {
+    html?: {
+      original: string,
+      modified: string
+    },
+    css?: {
+      original: string,
+      modified: string
+    },
+    javascript?: {
+      original: string,
+      modified: string
+    },
+    typescript?: {
+      original: string,
+      modified: string
+    },
+  } | null
+
 export const useDiffStore = defineStore('diffStore', () => {
     // 响应式状态
     const originalCode = ref('');   //原代码
     const modifiedCode = ref('');   //修改后的代码
     const modifiedCodeRaw = ref('');    //ai返回原始结果
     const currentSelection = ref<monaco.Selection | null>(null);
+    // 管理diff展示的状态
     const isDiffMode = ref(false);
     const diffResult = ref<DiffResult>({ lines: [], stats: { added: 0, removed: 0 } });
     let diffDecorations = ref<string[]>([]);
     // 保存选中的起始行号
     const selectionStartLine = ref(0);
-
+    // 管理 撤销/应用 diff的状态
+    const isRestoring = ref(false)
 
 function computeLineLevelDiff(
   originalText: string,
@@ -304,6 +325,8 @@ function computeLineLevelDiff(
     const model = editor.getModel()
     if (!model) return null
 
+    editor.updateOptions({ readOnly: false })
+
     originalCode.value = originalText
     modifiedCode.value = modifiedText
     modifiedCodeRaw.value = modifiedText
@@ -330,26 +353,108 @@ function computeLineLevelDiff(
   }
 
   // 完整文件还原 - 对应 processFullDiff，直接用 originalCode 覆盖整个文件
-  function restoreFullCode(editor: monaco.editor.IStandaloneCodeEditor | null) {
-    if (!editor) return
+  function restoreFullCode(
+  editor: monaco.editor.IStandaloneCodeEditor | null, 
+  pendingChanges: pendingChanges, 
+  language: 'html' | 'css' | 'javascript' | 'typescript'
+) {
+  if (!editor || !pendingChanges || !pendingChanges[language]?.original) return
 
-    const model = editor.getModel()
-    if (!model) return
+  const model = editor.getModel()
+  if (!model) return
 
-    const totalLines = model.getLineCount()
-    const fullRange = new monaco.Range(1, 1, totalLines, model.getLineMaxColumn(totalLines))
+  isRestoring.value = true
 
-    editor.updateOptions({ readOnly: false })
-    editor.executeEdits('restore-full', [{
-      range: fullRange,
-      text: originalCode.value,
-      forceMoveMarkers: true
-    }])
+  try {
+    const rawEditor = toRaw(editor)
+    
+    rawEditor.updateOptions({ readOnly: false })
 
-    diffDecorations.value = editor.deltaDecorations(diffDecorations.value, [])
+    const rawIds = toRaw(diffDecorations.value) || []
+    console.log('检查当前要清理的 ID 数组:', rawIds)
+
+    if (rawIds.length > 0 && typeof rawIds[0] === 'string') {
+      try {
+        // 使用原生的 rawEditor 来清理高亮，切断 Proxy 代理导致的内部死循环
+        diffDecorations.value = rawEditor.deltaDecorations(rawIds, [])
+      } catch (monacoErr) {
+        console.error('Monaco 清理高亮失败，触发降级', monacoErr)
+        diffDecorations.value = []
+      }
+    } else {
+      diffDecorations.value = []
+    }
+
+
+    // 同样用原生 model 赋值
+    toRaw(model).setValue(pendingChanges[language]?.original)
+
     isDiffMode.value = false
     currentSelection.value = null
+    originalCode.value = ''
+    modifiedCode.value = ''
+    modifiedCodeRaw.value = ''
+    
+  } catch (globalErr) {
+    console.error('撤销流程发生严重错误:', globalErr)
+  } finally {
+    requestAnimationFrame(() => {
+      isRestoring.value = false
+    })
   }
+}
+
+    // 完整文件替换 - 对应 processFullDiff，直接用 originalCode 覆盖整个文件
+  function replaceFullCode(
+  editor: monaco.editor.IStandaloneCodeEditor | null, 
+  pendingChanges: pendingChanges, 
+  language: 'html' | 'css' | 'javascript' | 'typescript'
+) {
+  if (!editor || !pendingChanges || !pendingChanges[language]?.modified) return
+
+  const model = editor.getModel()
+  if (!model) return
+
+  isRestoring.value = true
+
+  try {
+    const rawEditor = toRaw(editor)
+    
+    rawEditor.updateOptions({ readOnly: false })
+
+    const rawIds = toRaw(diffDecorations.value) || []
+    console.log('检查当前要清理的 ID 数组:', rawIds)
+
+    if (rawIds.length > 0 && typeof rawIds[0] === 'string') {
+      try {
+        // 使用原生的 rawEditor 来清理高亮，切断 Proxy 代理导致的内部死循环
+        diffDecorations.value = rawEditor.deltaDecorations(rawIds, [])
+      } catch (monacoErr) {
+        console.error('Monaco 清理高亮失败，触发降级', monacoErr)
+        diffDecorations.value = []
+      }
+    } else {
+      diffDecorations.value = []
+    }
+
+
+    // 同样用原生 model 赋值
+    toRaw(model).setValue(pendingChanges[language]?.modified)
+
+    isDiffMode.value = false
+    currentSelection.value = null
+    originalCode.value = ''
+    modifiedCode.value = ''
+    modifiedCodeRaw.value = ''
+    
+  } catch (globalErr) {
+    console.error('撤销流程发生严重错误:', globalErr)
+  } finally {
+    requestAnimationFrame(() => {
+      isRestoring.value = false
+    })
+  }
+}
 
   // 保存源代码
   function saveOriginalCode(code: string): void {
@@ -481,8 +586,10 @@ function computeLineLevelDiff(
     diffResult,
     diffDecorations,
     selectionStartLine,
+    isRestoring,
 
     // 方法
+    replaceFullCode,
     replaceCode,
     saveOriginalCode,
     restoreOriginalCode,

@@ -4,6 +4,8 @@ import { extractJson } from '../utils/extractJson.js'
 import { AI_TOOLS } from '../ai/toolSchemas.js'
 import { runFixErrorTool, runGenerateComponent, runImageToCode } from '../ai/toolExecutors.js'
 import type { AgentContext } from '../ai/type.js'
+import NodeCache from 'node-cache';
+import crypto from 'crypto';
 const router = express.Router()
 
 // ai
@@ -47,6 +49,9 @@ const fail = (res: Response, error: any, message = '请求失败') => {
     data: null,
   })
 }
+
+//  初始化缓存实例：默认 5 分钟 (300秒) 自动过期，每 10 分钟清理一次死缓存
+const aiCache = new NodeCache({ stdTTL: 300, checkperiod: 600 });
 
 // 小的流式响应，调用一次，写入一次，不会像.json一样自动结束
 function sendSSE(res: Response, event: string, data: any) {
@@ -359,6 +364,54 @@ router.post('/agent', async (req: Request, res: Response) => {
       return res.end()
     }
 
+    // 对所有agent因子做缓存
+    const cacheKey = `agent:${crypto.createHash('sha256').update(JSON.stringify({
+      userText, image, currentFiles, selectedCode, reactCode, consoleLogs
+    })).digest('hex')}`;
+
+    // 检查缓存命中结果
+    const cachedAgentData = aiCache.get<{ toolCalls: any[], toolResults: any[], finalContent : string }>(cacheKey);
+
+    if(cachedAgentData){
+      console.log(`[Agent Cache Hit] 🎯 完美命中 Agent 缓存！Key: ${cacheKey}`)
+
+      sendSSE(res, 'stage', {text: '⚡ 完美命中缓存，正在极速复现专家结果...'})
+
+       const toolCalls = cachedAgentData.toolCalls || [];
+       const toolResults = cachedAgentData.toolResults || [];
+
+      // 快速响应缓存中每一个响应的历史结果
+      if (toolCalls.length > 0) {
+        for (let i = 0; i < toolCalls.length; i++) {
+          if (toolCalls[i]) {
+            sendSSE(res, 'tool_call', toolCalls[i]);
+          }
+          
+          //  安全解构防御：即便 toolResults[i] 是 undefined，也不会报错
+          const currentResult = toolResults[i] || {};
+          sendSSE(res, 'tool_result', {
+            ...currentResult,
+            elapsedMs: 0 // 缓存响应时间记为 0ms
+          });
+        }
+      }
+
+      sendSSE(res, 'final', {
+        content: cachedAgentData.finalContent,
+        fromCache: true
+      })
+
+      sendSSE(res, 'done', {});
+      return res.end();
+    }
+
+    console.log('[Agent Cache Miss] ❌ 缓存未命中，启动真实大模型与工具链...');
+
+    // 【数据收集池】：用于把这次真实执行的数据存下来，供下次缓存
+    const executedToolCalls: any[] = [];
+    const executedToolResults: any[] = [];
+    let finalContent = '';
+
     sendSSE(res, 'stage', {
       text: '正在分析是否需要调用工具...',
     })
@@ -411,11 +464,15 @@ router.post('/agent', async (req: Request, res: Response) => {
       const toolCalls = assistantMessage?.tool_calls || []
 
       if (!toolCalls.length) {
+        finalContent = assistantMessage?.content || '我没有调用工具，直接完成回答。'
         sendSSE(res, 'final', {
-          content: assistantMessage?.content || '我没有调用工具，直接完成回答。',
+          content: finalContent,
         })
 
-      sendSSE(res, 'done', {})
+        // 写入缓存，无工具调用
+        aiCache.set(cacheKey, { toolCalls: [], toolResults: [], finalText: finalContent })
+
+        sendSSE(res, 'done', {})
         return res.end()
       }
 
@@ -431,6 +488,11 @@ router.post('/agent', async (req: Request, res: Response) => {
         const args = JSON.parse(toolCall.function.arguments || '{}')
 
         sendSSE(res, 'tool_call', {
+          id: toolCall.id,
+          name: toolName,
+          arguments: args,
+        })
+        executedToolCalls.push({
           id: toolCall.id,
           name: toolName,
           arguments: args,
@@ -456,6 +518,13 @@ router.post('/agent', async (req: Request, res: Response) => {
           elapsedMs,
         })
 
+        executedToolResults.push({
+          id: toolCall.id,
+          name: toolName,
+          result,
+          elapsedMs,
+        })
+
         messages.push({
           role: 'tool',
           tool_call_id: toolCall.id,
@@ -471,17 +540,21 @@ router.post('/agent', async (req: Request, res: Response) => {
       const hasImageToCode = toolCalls.some((t: ToolCall) => t.function.name === 'image_to_code')
 
       if (hasImageToCode) {
-        sendSSE(res, 'final', { content: '已根据图片生成代码，请确认是否应用。' })
+        finalContent = '已根据图片生成代码，请确认是否应用。'
+        sendSSE(res, 'final', { content:  finalContent})
       } else {
         const secondData = await callAiRaw(messages, {
           temperature: 0.3,
           max_tokens: 800,
         })
-        const finalText =
+        finalContent =
           secondData.choices?.[0]?.message?.content ||
           '已完成，结果已进入 Diff 确认流程。'
-        sendSSE(res, 'final', { content: finalText })
+        sendSSE(res, 'final', { content: finalContent })
       }
+
+      aiCache.set(cacheKey, {toolCalls:executedToolCalls, toolResults:executedToolResults, finalContent})
+
       sendSSE(res, 'done', {})
       res.end()
 

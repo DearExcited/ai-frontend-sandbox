@@ -21,6 +21,25 @@ export const useAiStore = defineStore('useAiStore', () => {
     onError?: (data: any) => void
   }
 
+   type pendingChange = {
+    html?: {
+      original: string,
+      modified: string
+    },
+    css?: {
+      original: string,
+      modified: string
+    },
+    javascript?: {
+      original: string,
+      modified: string
+    },
+    typescript?: {
+      original: string,
+      modified: string
+    },
+  } | null
+
   const aiInputImg = ref<string>('')
 
   const codeStore = useCodeStore()
@@ -53,6 +72,8 @@ export const useAiStore = defineStore('useAiStore', () => {
   const lastSession   = ref<languages.InlineCompletions<languages.InlineCompletion> | null>(null)
   // 保存编辑器实例，供外部（如 Header）调用
   const editorInstance = ref<monaco.editor.IStandaloneCodeEditor | null>(null)
+  // 当前激活的 tab 语言
+  const currentLanguage = ref<'html' | 'css' | 'javascript' | 'typescript'>('javascript')
   // 保存内联补全提供器变量,方便卸载
   const provider      = ref<monaco.IDisposable | null>(null)
   // 防抖与节流
@@ -61,18 +82,13 @@ export const useAiStore = defineStore('useAiStore', () => {
   // 防抖
   const getAICompletionDebounced = debounceAsync(getAICompletion, 500)
 
-  const pendingChanges = ref<{
-    html?: string
-    css?: string
-    javascript?: string
-    typescript?: string
-  } | null>(null)
+  const pendingChanges = ref<pendingChange>(null)
 
   // console 错误日志，由 consolePanel 同步过来
   const consoleLogs = ref<string[]>([])
 
-  // 'confirm' 触发 replaceCode，'revert' 触发 restoreOriginalCode，null 表示无操作
-  const fixAction = ref<'confirm' | 'revert' | null>(null)
+  // 标记缓存是否命中
+  const isFromCache =ref(false)
 
   // ai交互开关
   function openEdit() {
@@ -124,7 +140,10 @@ export const useAiStore = defineStore('useAiStore', () => {
     // 文本框中消息检查
     if (!aiInput.value.trim() && !img) return;
 
+    isFromCache.value = false
+
     // 消息清除末尾空格,若只发图片就用图片文本占位
+    const diffStore = useDiffStore()
     const userText = aiInput.value.trim() || '[图片]';
     // 加入消息队列
     aiAgentMessages.value.push({
@@ -213,13 +232,24 @@ export const useAiStore = defineStore('useAiStore', () => {
               const fixedFiles = data.result?.fixedFiles
 
               if(fixedFiles){
-                pendingChanges.value = {
-                  html: fixedFiles.html ?? codeStore.htmlCode,
-                  css: fixedFiles.css ?? codeStore.cssCode,
-                  javascript: fixedFiles.javascript ?? codeStore.jsCode,
-                }
+                diffStore.isDiffMode = true
+                pendingChanges.value ={
+                  html: {
+                    original: codeStore.htmlCode,
+                    modified: fixedFiles.html ?? codeStore.htmlCode,
+                  },
 
-                aiAgentMessages.value.push({
+                  css: {
+                    original: codeStore.cssCode,
+                    modified: fixedFiles.css ?? codeStore.cssCode,
+                  },
+
+                  javascript: {
+                    original: codeStore.jsCode,
+                    modified: fixedFiles.javascript ?? codeStore.jsCode,
+                  }
+                }
+              aiAgentMessages.value.push({
                   role: 'assistant',
                   content: '已生成修复代码，请确认是否应用。',
                 })
@@ -229,8 +259,12 @@ export const useAiStore = defineStore('useAiStore', () => {
             if(data.name === 'generate_component'){
               const newComponent = data.result?.reactCode
               if(newComponent){
+                diffStore.isDiffMode = true
                 pendingChanges.value = {
-                  typescript: newComponent,
+                  typescript: {
+                    original:codeStore.reactCode,
+                    modified: newComponent ?? codeStore.reactCode
+                  }
                 }
               }
 
@@ -244,9 +278,20 @@ export const useAiStore = defineStore('useAiStore', () => {
               const newCode = data.result?.files
               if(newCode){
                 pendingChanges.value = {
-                  html: newCode.html,
-                  css: newCode.css,
-                  javascript: newCode.javascript
+                 html: {
+                    original: codeStore.htmlCode,
+                    modified: newCode.html ?? codeStore.htmlCode,
+                  },
+
+                  css: {
+                    original: codeStore.cssCode,
+                    modified: newCode.css ?? codeStore.cssCode,
+                  },
+
+                  javascript: {
+                    original: codeStore.jsCode,
+                    modified: newCode.javascript ?? codeStore.jsCode,
+                  }
                 }
               }
 
@@ -259,6 +304,9 @@ export const useAiStore = defineStore('useAiStore', () => {
 
           onFinal(data) {
             aiAgentMessages.value[assistantIndex] = { role: 'assistant', content: data.content || '处理完成' }
+            if(data.fromCache){
+              isFromCache.value = true
+            }
           },
 
           onError(data) {
@@ -559,6 +607,7 @@ export const useAiStore = defineStore('useAiStore', () => {
 
           case 'final':
             handlers.onFinal?.(data)
+
             break
 
           case 'done':
@@ -694,24 +743,57 @@ async function fixByAi (eMessage: string[]){
   }
 }
 
+  function registerEditor(language: 'html' | 'css' | 'javascript' | 'typescript', editor: monaco.editor.IStandaloneCodeEditor) {
+    editorInstance.value = editor
+    currentLanguage.value = language
+  }
+
+  function unregisterEditor(language: 'html' | 'css' | 'javascript' | 'typescript') {
+    if (currentLanguage.value === language) {
+      editorInstance.value = null
+    }
+  }
+
+  // ai agent 的代码替换操作
   function applyAllChanges() {
     if (!pendingChanges.value) return
-    fixAction.value = 'confirm'
+    const diffStore = useDiffStore()
+    const lang = currentLanguage.value
+    const editor = editorInstance.value
+
+    // 当前可见 tab：用 editor 做 diff 然后直接替换
+    if (editor && pendingChanges.value[lang]) {
+      diffStore.replaceFullCode(editor,pendingChanges.value, currentLanguage.value)
+    }
+
+    // 其他 tab：直接写 store，切过去时展示新代码
+    const langs = ['html', 'css', 'javascript', 'typescript'] as const
+    for (const l of langs) {
+      const code = pendingChanges.value[l]?.modified
+      if (!code) continue
+      if (l === 'html') codeStore.setHtmlCode(code)
+      else if (l === 'css') codeStore.setCssCode(code)
+      else if (l === 'javascript') codeStore.setJsCode(code)
+      else if (l === 'typescript') codeStore.setReactCode(code)
+    }
+
+    pendingChanges.value = null
   }
 
   function revertAllChanges() {
-    fixAction.value = 'revert'
+    const diffStore = useDiffStore()
+    const editor = editorInstance.value
+    if (editor && diffStore.isDiffMode) {
+      diffStore.restoreFullCode(editor, pendingChanges.value, currentLanguage.value)
+    }
+    pendingChanges.value = null
   }
-
-
-   onUnmounted(() => {
-    disableAIAssistant()
-  })
 
    return {
     isEnabled,
     isLoading,
     editorInstance,
+    currentLanguage,
     agentHistory,
     MAX_TURNS,
     aiAgentMessages,
@@ -725,8 +807,10 @@ async function fixByAi (eMessage: string[]){
     throttleFlags,
     pendingChanges,
     consoleLogs,
-    fixAction,
     aiInputImg,
+    isFromCache,
+    registerEditor,
+    unregisterEditor,
     applyAllChanges,
     revertAllChanges,
     openEdit,

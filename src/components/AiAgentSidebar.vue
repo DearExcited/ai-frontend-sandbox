@@ -37,7 +37,12 @@
         </div>
         <div v-else class="msg-row msg-row--assistant">
           <div class="avatar">AI</div>
-          <div class="bubble bubble--assistant">{{ msg.content }}</div>
+
+          <div v-if="aiStore.isFromCache && index === aiStore.aiAgentMessages.length - 1" class="cache-badge">
+            <font-awesome-icon icon="fa-solid fa-bolt" class="bolt-icon" />
+            <span>极速缓存回放</span>
+          </div>
+          <div class="bubble bubble--assistant">{{ msg.content }}</div> 
         </div>
       </template>
 
@@ -142,6 +147,7 @@ const sendMsg = () => {
     codeStore.jsCode,
     codeStore.reactCode,
   ].filter(Boolean).join('\n\n')
+  // console.log(aiStore.aiInputImg)
   aiStore.sendAgentMsg(ctx, aiStore.aiInputImg)
   aiStore.aiInput = ''
   aiStore.aiInputImg = ''
@@ -446,5 +452,35 @@ watch(
 .msg-image img {
   max-width: 180px;
   border-radius: 8px;
+}
+
+.bubble-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 82%;
+}
+
+.cache-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #4ec9b0; /* 极客绿 */
+  background: rgba(78, 201, 176, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  border: 1px solid rgba(78, 201, 176, 0.2);
+  animation: fadeIn 0.3s ease;
+}
+
+.bolt-icon {
+  color: #dcdcaa; /* 闪电金 */
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 </style>

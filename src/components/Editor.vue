@@ -50,7 +50,7 @@
 </template>
 
 <script setup lang="ts">
-  import {ref, watch, computed, onMounted, onUnmounted} from 'vue'
+  import {ref, watch, computed, onMounted, onUnmounted, nextTick} from 'vue'
   import * as monaco from 'monaco-editor';
   import 'monaco-editor/esm/vs/language/html/monaco.contribution';
   import 'monaco-editor/esm/vs/language/css/monaco.contribution';
@@ -60,6 +60,7 @@
   import { useDiffStore } from '../store/useDiffStore';
   import { loadReactTypes } from '../utils/loadReactTypes'
   import { ElTooltip } from 'element-plus';
+  import { debounce } from '../utils/debounce';
   const codeStore = useCodeStore()
   const diffStore = useDiffStore()
   const aiStore = useAiStore()
@@ -90,6 +91,8 @@
     }
   }
 
+  const deupdateStoreCode = debounce(updateStoreCode, 500)
+
   // 判断当前是否为JS路由，可以不用路由路径判断
   const isJSRoute = computed(() => {
     return props.language === 'javascript'
@@ -100,33 +103,27 @@
     aiStore.sendEditMsg(codeStore.getSelectedCode(editor!), editor!)
   }
 
-  // 监听 fixAction：当前 tab 的编辑器执行应用或撤销，然后清空 pendingChanges
-  watch(
-    () => aiStore.fixAction,
-    (action) => {
-      if (!action || !editor) return
-      if (action === 'confirm') {
-        diffStore.replaceCode(editor)
-      } else if (action === 'revert') {
-        diffStore.restoreFullCode(editor)
-      }
-      aiStore.fixAction = null
-      aiStore.pendingChanges = null
-    }
-  )
+  function renderPendingDiff() {
+    const currentEditor = editor
+    if (!currentEditor?.getModel()) return
+    if (!diffStore.isDiffMode) return
 
-  // 监听 pendingChanges 或语言切换：对当前 tab 执行 diff
-  watch(
-    [() => aiStore.pendingChanges, () => props.language],
-    () => {
-      const changes = aiStore.pendingChanges
-      if (!changes || !editor) return
-      const key = props.language as keyof typeof changes
-      const newCode = changes[key]
-      if (!newCode) return
-      diffStore.processFullDiff(editor, getCurrentCode(), newCode)
-    }
-  )
+    const pending =
+      aiStore.pendingChanges?.[
+        props.language as keyof typeof aiStore.pendingChanges
+      ]
+
+    if (!pending) return
+
+    console.log(pending.original)
+    console.log(pending.modified)
+
+    diffStore.processFullDiff(
+      currentEditor,
+      pending.original,
+      pending.modified
+    )
+  }
 
   // 配置jsx
   function configureTypeScriptForJSX() {
@@ -240,13 +237,26 @@
         await loadReactTypes(monaco)
         configureTypeScriptForJSX()
       }
+
+      await nextTick()
+
+      requestAnimationFrame(() => {
+        renderPendingDiff()
+      })
+
       editor.onDidChangeModelContent(() => {
-        if (editor) {
-          updateStoreCode(editor.getValue())
-        }
+        if (!editor) return
+
+        if (diffStore.isDiffMode) return
+        if (diffStore.isRestoring) return
+
+        deupdateStoreCode(editor.getValue())
       });
 
-      // 处在js路由时起用ai功能
+      // 注册当前 editor 实例到 aiStore
+      aiStore.registerEditor(props.language, editor)
+
+      // 处在js路由时起用ai内联补全功能
       if (isJSRoute.value && props.language === 'javascript' && editor) {
         aiStore.enableAIAssistant(editor);
       }
@@ -275,15 +285,55 @@
         jsx: monaco.languages.typescript.JsxEmit.None,
       })
     }
+
+    aiStore.currentLanguage = newLang
+
+    await nextTick()
+
+    requestAnimationFrame(() => {
+      renderPendingDiff()
+    })
   })
+
+  // 监听实现切换语言diff展示
+  watch(
+  [
+    () => props.language,
+    () => aiStore.pendingChanges,
+    () => diffStore.isDiffMode,
+  ],
+  async () => {
+    if (!diffStore.isDiffMode) return
+    if (diffStore.isRestoring) return
+    if (!aiStore.pendingChanges) return
+
+    await nextTick()
+
+    requestAnimationFrame(() => {
+      renderPendingDiff()
+    })
+  },
+  {
+    deep: true,
+    flush: 'post',
+  }
+)
 
   // 卸载
   onUnmounted(() => {
     if (editor) {
+      const model = editor.getModel()
+      editor.setModel(null)
+      model?.dispose()
       editor.dispose()
+      editor = null
     }
+    aiStore.unregisterEditor(props.language)
+    aiStore.disableAIAssistant()
 
-    aiStore.disableAIAssistant();
+    // ★ 核心修复：组件卸载时，立即清空 store 里的旧 ID，切断幽灵ID的传递
+    const diffStore = useDiffStore()
+    diffStore.diffDecorations = [] 
   })
 
 </script>

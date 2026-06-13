@@ -5,12 +5,17 @@ import mongoose from 'mongoose'
 import projectsRouter from './routes/project.js'
 import versionRouter from './routes/version.js'
 import aiRouter from'./routes/ai.js'
+import rateLimit from 'express-rate-limit'
+import helmet from 'helmet'
 dotenv.config()
 
 // 后端服务器实例
 const app = express()
 // 跨域
-app.use(cors())
+app.use(helmet())
+app.use(express.json({ limit: '10mb' }))  // 防止超大 base64 图片 OOM
+app.use('/api/ai', rateLimit({ windowMs: 60000, max: 20 }))
+app.use(cors({ origin: ['http://localhost:5173'] }))
 // 让后端可以解析JSON请求体
 app.use(express.json())
 app.use('/api/projects/:id/versions', versionRouter)

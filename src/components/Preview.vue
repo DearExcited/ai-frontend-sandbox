@@ -12,20 +12,26 @@
       height="100%">
     </iframe>
 
-    <console :logs="logs"></console>
+    <console-panel :logs="logs"></console-panel>
   </div>
 </template>
 
 <script setup lang="ts" name="Preview">
-  import { ref, onMounted, watch, computed } from 'vue';
+  import { ref, onMounted, watch, computed, onUnmounted } from 'vue';
   import { useCodeStore } from '../store/useCodeStore';
   import * as Babel from '@babel/standalone'
   import { useRoute } from 'vue-router';
-  import console from './consolePanel.vue';
+  import { debounce } from '../utils/debounce.ts';
+  import consolePanel from './consolePanel.vue';
+  import CompilerWorker from '../workers/compiler.worker?worker'
+import ConsolePanel from './consolePanel.vue';
   type LogItem = { id: string; type: 'log'|'warn'|'error'|'info'; text: string; ts: number };
   const logs = ref<LogItem[]>([]);
   const route = useRoute()
   const codeStore = useCodeStore()
+  const compiledCode = ref('')
+  const compileDuration = ref(0) // 记录编译耗时
+  const worker = new CompilerWorker()
   // 沙箱DOM元素绑定
   const previewFrame = ref<HTMLIFrameElement | null>(null);
   const language = computed(() => {
@@ -66,23 +72,44 @@
 
   // 浏览器不能直接编译TSX，所以需要这一步
     /* 把 TSX → JS */
-  function compileTsx(code: string): string {
-    try {
-      const result = Babel.transform(code, {
-        presets:[
-          ['react', { runtime: 'classic' }],
-          ['typescript', { isTSX: true, allExtensions: true }],
-        ],
-      })
-      return result.code || ''
-    } catch (e: any) {
-      return `console.error('编译失败:', ${JSON.stringify(e.message)})`
-    }
+
+  async function compileReactCodeAsync(rawCode: string): Promise<string>{
+    return new Promise((resolve, reject) => {
+      // 生成本次编译id 方便记录编译耗时
+      const taskId = Math.random().toString(36).slice(2)
+
+      const handleMessage = (e : MessageEvent) => {
+        const {id, compiled, error, success} = e.data 
+        if( id !== taskId) return
+        // 卸载监听器
+        worker.removeEventListener('message', handleMessage)
+         if (success) {
+          resolve(compiled)
+        } else {
+          reject(new Error(error))
+        }
+      }
+
+      worker.addEventListener('message', handleMessage)
+      worker.postMessage({ code: rawCode, id: taskId })
+    })
   }
 
-  const generateReactHtml = () => {
-    const compiledJs = compileTsx(codeStore.reactCode);
+  // function compileTsx(code: string): string {
+  //   try {
+  //     const result = Babel.transform(code, {
+  //       presets:[
+  //         ['react', { runtime: 'classic' }],
+  //         ['typescript', { isTSX: true, allExtensions: true }],
+  //       ],
+  //     })
+  //     return result.code || ''
+  //   } catch (e: any) {
+  //     return `console.error('编译失败:', ${JSON.stringify(e.message)})`
+  //   }
+  // }
 
+  const generateReactHtml = (complieJsCode: string) => {
     return `
       <!DOCTYPE html>
       <html>
@@ -98,7 +125,7 @@
           <script>
             const { useState, useEffect, useRef, useCallback, useMemo } = React;
             try {
-              ${compiledJs}
+              ${complieJsCode}
               const root = ReactDOM.createRoot(document.getElementById('root'));
               root.render(React.createElement(App));
             } catch (error) {
@@ -164,28 +191,62 @@
     `;
   };
   
-  // 更新展示区，感觉要加防抖
-  const updatePreview = () => {
+  // 更新展示区
+  const updatePreview = async () => {
     if (!previewFrame.value) return
+    logs.value = [] // 清空界面日志
 
-    logs.value = []
+    const startTime = performance.now()
 
-    if( language.value === 'typescript' ) {
-      previewFrame.value.srcdoc = generateReactHtml();
+    // 1. Iframe 渲染完毕的监听器
+    const handleLoad = () => {
+      if (!previewFrame.value) return
+      const endTime = performance.now()
+      const duration = endTime - startTime
+      console.log(`%c[Iframe Render] 界面刷新总耗时: ${duration.toFixed(2)} ms`, 'color: #67C23A; font-weight: bold;')
+      previewFrame.value.removeEventListener('load', handleLoad)
+    }
+    previewFrame.value.addEventListener('load', handleLoad)
+
+    // 2. 分流处理
+    if (language.value === 'typescript') {
+      console.log('[Compiler] 收到新代码，投放给 Worker 线程编译...')
+      const workerStartTime = performance.now()
+
+      try {
+        // 异步等待编译结果
+        const compileJsCode = await compileReactCodeAsync(codeStore.reactCode)
+        
+        // 存储编译耗时与代码状态
+        compiledCode.value = compileJsCode
+        compileDuration.value = performance.now() - workerStartTime
+        console.log(`%c[Compiler Worker] 编译成功！耗时: ${compileDuration.value.toFixed(2)} ms`, 'color: #409EFF; font-weight: bold;')
+
+        // 塞入 Iframe 渲染
+        previewFrame.value.srcdoc = generateReactHtml(compileJsCode);
+      } catch (err: any) {
+        // 🛡️ 防御机制：代码语法错误时，直接把红字错误丢进 iframe 提示，体验极佳
+        console.error('[Compiler Worker] 编译发生语法错误:', err.message)
+        previewFrame.value.srcdoc = `<pre style="color: #ff4d4f; background: #fff1f0; padding: 20px; font-family: monospace; border: 1px solid #ffa39e; border-radius: 4px;">❌ React 编译失败:\n${err.message}</pre>`
+      }
     } else {
+      // 普通模式直接同步渲染
       previewFrame.value.srcdoc = generateFullHtml();
     }
-
   }
+
+  const deUpdatePreview = debounce(updatePreview, 200)
 
   // 监听代码变化
   watch(
     () => [codeStore.htmlCode, codeStore.cssCode, codeStore.jsCode, codeStore.reactCode, language.value],
-    updatePreview,
+    deUpdatePreview,
     { deep: true }
   );
 
   onMounted(updatePreview);
+  onUnmounted(window.removeEventListener('message', jsMessage))
+  onUnmounted(worker.terminate())
 </script>
 
 <style>
