@@ -228,6 +228,36 @@ export const useAiStore = defineStore('useAiStore', () => {
               content: `✅ 工具完成: ${data.name}，耗时 ${data.elapsedMs ?? 0}ms`,
             })
 
+            if (data.name.startsWith('mcp__')) {
+              const [, serverName, toolName] = data.name.split('__');
+
+              // 场景1：如果是文件系统修改了代码，直接把后端同步过来的最新代码刷进 Pinia 暂存或直接更新
+              if (serverName === 'filesystem' && data.result?.currentPhysicalFiles) {
+                const physicalFiles = data.result.currentPhysicalFiles;
+                
+                // 弹出 Diff 视图让用户确认 AI 自动改文件的结果
+                diffStore.isDiffMode = true;
+                pendingChanges.value = {
+                  html: { original: codeStore.htmlCode, modified: physicalFiles.html || codeStore.htmlCode },
+                  css: { original: codeStore.cssCode, modified: physicalFiles.css || codeStore.cssCode },
+                  javascript: { original: codeStore.jsCode, modified: physicalFiles.javascript || codeStore.jsCode },
+                };
+
+                aiAgentMessages.value.push({
+                  role: 'assistant',
+                  content: `🤖 外部工具 [${toolName}] 已自动修改物理文件，已为你生成变更对比，请确认是否应用到编辑器。`,
+                });
+              }
+
+              // 场景2：如果是网页爬虫 fetch 成功
+              if (serverName === 'fetch') {
+                aiAgentMessages.value.push({
+                  role: 'assistant',
+                  content: `🌐 成功通过 MCP 爬虫工具读取了远程页面，已自动将上下文喂给 AI 进行分析。`,
+                });
+              }
+            }
+
             if (data.name === 'fix_error'){
               const fixedFiles = data.result?.fixedFiles
 

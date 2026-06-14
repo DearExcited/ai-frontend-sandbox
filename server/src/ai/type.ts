@@ -1,5 +1,5 @@
 export type AiTool = {
-  type: 'function'
+  type:string
   function: {
     name: string
     description: string

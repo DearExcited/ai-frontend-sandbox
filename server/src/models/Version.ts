@@ -21,4 +21,6 @@ const VersionSchema = new Schema<IVersion>({
   aiPatch: String
 }, { timestamps: true })
 
+VersionSchema.index({ projectId: 1, createdAt: 1 });
+
 export default mongoose.model<IVersion>('Version', VersionSchema)

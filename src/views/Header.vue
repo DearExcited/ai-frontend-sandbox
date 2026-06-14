@@ -109,6 +109,12 @@
                 <span class="version-date">{{ new Date(version.createdAt).toLocaleString() }}</span>
               </div>
               <div class="version-actions">
+                <el-tooltip content="载入" placement="top">
+                  <button class="version-btn" @click.stop="handleLoadVersionCode(project, version)">
+                    <font-awesome-icon icon="fa-solid fa-download" />
+                  </button>
+                </el-tooltip>
+
                 <el-tooltip content="Diff" placement="top">
                   <button class="version-btn" @click.stop="handleVersionDiff(version)">
                     <font-awesome-icon icon="fa-solid fa-code-compare" />
@@ -148,6 +154,7 @@
   import { useVersionDiffStore } from '../store/useVersionDiffStroe.ts';
   import type { TabsPaneContext } from 'element-plus'
   import { ElDialog, ElForm, ElButton, ElFormItem, ElOption, ElSelect, ElInput, ElTabs, ElTabPane, ElMessage, ElDrawer,ElTooltip, ElMessageBox } from 'element-plus';
+  import DiffMatchPatch from 'diff-match-patch'
   import diffDialogForm from '../components/diffDialogForm.vue';
   import { useAiStore } from '../store/useAiStore.ts';
   const autoOn = ref(true)                                 //自动补全状态
@@ -330,11 +337,7 @@
         }
       )
 
-      const rollbackFiles = {
-        html: version.files?.html || version.html || '',
-        css: version.files?.css || version.css || '',
-        javascript: version.files?.javascript || version.javascript || '',
-      }
+      const {data: {files:rollbackFiles}} =  await projectService.getVersionCode(project._id, version._id)
 
       codeStore.htmlCode = rollbackFiles.html
       codeStore.cssCode = rollbackFiles.css
@@ -378,6 +381,100 @@
       ElMessage.error(error.message || '删除版本失败')
     }
   }
+
+  const handleLoadVersionCode = async (project: any, version : any) => {
+    try{
+      if(!project || !version) return
+      const {data: {files}} =  await projectService.getVersionCode(project._id, version._id)
+      codeStore.setHtmlCode(files.html)
+      codeStore.setCssCode(files.css)
+      codeStore.setJsCode(files.javascript)
+      codeStore.setReactCode(files.typescript)
+    }catch(error : any){
+      ElMessage.error(error.message || '加载代码失败')
+    }
+  }
+// 将压测函数直接挂载到 window 上，像测试数据结构一样，零 UI 污染
+(window as any).runStorageBenchmark = () => {
+  const dmp = new DiffMatchPatch();
+
+  // 1. 实时获取你 Pinia 仓储里，当前编辑器中的真实代码结构
+  const currentCode = {
+    html: codeStore.htmlCode || '',
+    css: codeStore.cssCode || '',
+    javascript: codeStore.jsCode || ''
+  };
+
+  // 核心计算工具：计算两组文件之间的 Patch 体积以及压缩率
+  const calculateMetrics = (oldFiles: typeof currentCode, newFiles: typeof currentCode) => {
+    // 模拟后端计算：分别对 html, css, js 做 diff 并生成补丁文本
+    let patchText = '';
+    const keys = ['html', 'css', 'javascript'] as const;
+    
+    keys.forEach(key => {
+      const diffs = dmp.diff_main(oldFiles[key], newFiles[key]);
+      dmp.diff_cleanupEfficiency(diffs);
+      const patches = dmp.patch_make(oldFiles[key], diffs);
+      patchText += dmp.patch_toText(patches);
+    });
+
+    // 🌟 严格采用你的体积对比逻辑
+    const fullSize = JSON.stringify(newFiles).length;
+    const deltaSize = JSON.stringify(patchText).length;
+    const reduction = ((1 - deltaSize / fullSize) * 100).toFixed(1);
+
+    return {
+      '全量快照体积 (Chars)': fullSize,
+      '增量 Delta 体积 (Chars)': deltaSize,
+      '真实压缩率': `${reduction}%`
+    };
+  };
+
+  console.log('%c🚀 开始基于当前编辑器真实代码进行增量存储压测...', 'color: #0078d4; font-weight: bold;');
+
+  if (JSON.stringify(currentCode).length < 100) {
+    console.warn('⚠️ 当前编辑器里几乎没写代码，建议先在沙箱里多写/贴点真实的 HTML/JS 页面再测，数据会极具说服力！');
+  }
+
+  const report: Record<string, any> = {};
+
+  // 场景 A：小改动（在你当前的 JS 后面改了一行，加个注释或改个变量）
+  const smallChange = {
+    ...currentCode,
+    javascript: currentCode.javascript + '\n// 💡 Line Fix: const debugMode = false;'
+  };
+  report['1. 小改动 (日常修错别字/单行逻辑)'] = calculateMetrics(currentCode, smallChange);
+
+  // 场景 B：中改动（日常修 Bug，HTML 塞个节点，CSS 补个样式）
+  const mediumChange = {
+    ...currentCode,
+    html: currentCode.html + '\n<div class="test-tips"></div>',
+    css: currentCode.css + '\n.test-tips { color: red; font-size: 12px; }'
+  };
+  report['2. 中改动 (新增节点并配上样式)'] = calculateMetrics(currentCode, mediumChange);
+
+  // 场景 C：大改动（模拟直接贴入一整个防抖/节流或大网络请求函数模块）
+  const largeJsBlock = `
+  // ==================== 新增沙箱监控大模块 ====================
+  function startSandboxPerformanceMonitor() {
+    console.log("Performance monitoring active.");
+    performance.mark("sandbox-start");
+    setInterval(() => {
+      const mem = (performance as any).memory;
+      if(mem) console.log("JS Heap Size:", mem.usedJSHeapSize);
+    }, 2000);
+  }
+  startSandboxPerformanceMonitor();
+  `;
+  const largeChange = {
+    ...currentCode,
+    javascript: currentCode.javascript + '\n' + largeJsBlock
+  };
+  report['3. 大改动 (重构/塞入一整个新逻辑模块)'] = calculateMetrics(currentCode, largeChange);
+
+  // 完美的控制台表格可视化输出
+  console.table(report);
+};
 </script>
 
 <style scoped>

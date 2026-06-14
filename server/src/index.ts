@@ -7,11 +7,38 @@ import versionRouter from './routes/version.js'
 import aiRouter from'./routes/ai.js'
 import rateLimit from 'express-rate-limit'
 import helmet from 'helmet'
+import { mcpManager } from './mcp/mcpManager.js';
+import fs from 'fs';
+import path from 'path';
 dotenv.config()
 
 // 后端服务器实例
 const app = express()
+const sandboxPath = 'C:\\tmp\\sandbox-web'; 
 // 跨域
+async function initMCPServers(){
+  console.log('正在初始化 MCP 服务中...');
+
+  if (!fs.existsSync(sandboxPath)) {
+    fs.mkdirSync(sandboxPath, { recursive: true });
+    console.log(`[MCP Setup] 成功自动创建沙箱目录: ${sandboxPath}`);
+  }
+
+  await mcpManager.connectServer(
+    'filesystem',
+    'npx.cmd',
+    ['-y', '@modelcontextprotocol/server-filesystem', '/tmp/sandbox-web']
+  )
+
+  const localFetchPath = path.resolve(process.cwd(), 'mcp-server-fetch.js');
+
+  mcpManager.connectServer(
+    'fetch', 
+    'node', // 改用本地 node 启动，防止npx 和 404 报错
+    [localFetchPath]
+  );
+}
+
 app.use(helmet())
 app.use(express.json({ limit: '10mb' }))  // 防止超大 base64 图片 OOM
 app.use('/api/ai', rateLimit({ windowMs: 60000, max: 20 }))
@@ -30,6 +57,9 @@ app.get('/health', (rep, res) => {
 })
 const PORT = process.env.PORT || 3001
 const MONGODB_URI = process.env.MONGODB_URI
+
+// 初始化mcp工具
+initMCPServers();
 
 // 启动服务
 async function startServer(){

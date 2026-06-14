@@ -30,5 +30,6 @@ export const projectService ={
   ).then(r => r.json()),
   deleteVersion:(projectId:string ,versionId: string) => fetch(`${BASE}/projects/${projectId}/versions/${versionId}`, {
     method:'DELETE'
-  }).then(r => r.json())
+  }).then(r => r.json()),
+  getVersionCode:(projectId:string ,versionId: string) => fetch(`${BASE}/projects/${projectId}/versions/${versionId}/code`).then(r => r.json())
 }

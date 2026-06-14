@@ -4,6 +4,7 @@ import { extractJson } from '../utils/extractJson.js'
 import { AI_TOOLS } from '../ai/toolSchemas.js'
 import { runFixErrorTool, runGenerateComponent, runImageToCode } from '../ai/toolExecutors.js'
 import type { AgentContext } from '../ai/type.js'
+import { mcpManager } from '../mcp/mcpManager.js'
 import NodeCache from 'node-cache';
 import crypto from 'crypto';
 const router = express.Router()
@@ -26,7 +27,7 @@ type AiMessage =
 
 // ai工具类型
 type AiTool = {
-  type: 'function'
+  type: string
   function: {
     name: string
     description: string
@@ -343,7 +344,7 @@ router.post('/agent', async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-cache, no-transform')
   res.setHeader('Connection', 'keep-alive')
 
-  try{
+  try {
     const {
       userText,
       image,
@@ -354,7 +355,7 @@ router.post('/agent', async (req: Request, res: Response) => {
       history = [],
     } = req.body
 
-     if (!userText) {
+    if (!userText) {
       sendSSE(res, 'error', { message: 'userText 不能为空' })
       return res.end()
     }
@@ -370,15 +371,14 @@ router.post('/agent', async (req: Request, res: Response) => {
     })).digest('hex')}`;
 
     // 检查缓存命中结果
-    const cachedAgentData = aiCache.get<{ toolCalls: any[], toolResults: any[], finalContent : string }>(cacheKey);
+    const cachedAgentData = aiCache.get<{ toolCalls: any[], toolResults: any[], finalContent: string }>(cacheKey);
 
-    if(cachedAgentData){
+    if (cachedAgentData) {
       console.log(`[Agent Cache Hit] 🎯 完美命中 Agent 缓存！Key: ${cacheKey}`)
+      sendSSE(res, 'stage', { text: '⚡ 完美命中缓存，正在极速复现专家结果...' })
 
-      sendSSE(res, 'stage', {text: '⚡ 完美命中缓存，正在极速复现专家结果...'})
-
-       const toolCalls = cachedAgentData.toolCalls || [];
-       const toolResults = cachedAgentData.toolResults || [];
+      const toolCalls = cachedAgentData.toolCalls || [];
+      const toolResults = cachedAgentData.toolResults || [];
 
       // 快速响应缓存中每一个响应的历史结果
       if (toolCalls.length > 0) {
@@ -386,8 +386,6 @@ router.post('/agent', async (req: Request, res: Response) => {
           if (toolCalls[i]) {
             sendSSE(res, 'tool_call', toolCalls[i]);
           }
-          
-          //  安全解构防御：即便 toolResults[i] 是 undefined，也不会报错
           const currentResult = toolResults[i] || {};
           sendSSE(res, 'tool_result', {
             ...currentResult,
@@ -412,9 +410,24 @@ router.post('/agent', async (req: Request, res: Response) => {
     const executedToolResults: any[] = [];
     let finalContent = '';
 
-    sendSSE(res, 'stage', {
-      text: '正在分析是否需要调用工具...',
-    })
+    // 动态抓取并合并MCP工具
+    let finalTools = [...AI_TOOLS];
+    try {
+      const mcpTools = await mcpManager.getAllTools();
+      const mcpToolSchemas = mcpTools.map(t => ({
+        type: 'function',
+        function: {
+          name: `mcp__${t._mcpServer}__${t.name}`, // 使用双下划线隔离命名空间，防止冲突
+          description: t.description || '无描述',
+          parameters: t.inputSchema // MCP 返回的标准 JsonSchema 直接透传
+        }
+      }));
+      finalTools = [...finalTools, ...mcpToolSchemas];
+    } catch (mcpErr) {
+      console.error('[MCP] 动态获取工具失败，降级使用内置工具链:', mcpErr);
+    }
+
+    sendSSE(res, 'stage', { text: '正在分析是否需要调用工具...' });
 
     // 用户消息：有图片时构造 multimodal content
     const userMessage: AiMessage = image
@@ -427,7 +440,7 @@ router.post('/agent', async (req: Request, res: Response) => {
         }
       : { role: 'user', content: userText }
 
-     const messages: AiMessage[] = [
+    const messages: AiMessage[] = [
       {
         role: 'system',
         content: `
@@ -447,124 +460,147 @@ router.post('/agent', async (req: Request, res: Response) => {
           ? `【当前控制台错误信息】\n${consoleLogs.map((e: string, i: number) => `${i + 1}. ${e}`).join('\n')}`
           : '【当前控制台无错误】'
         }
-                `.trim(),
-              },
-        ...history,
-        userMessage,
-      ]
+        `.trim(),
+      },
+      ...history,
+      userMessage,
+    ];
 
-      const firstData = await callAiRaw(messages, {
-        tools: AI_TOOLS,
-        tool_choice: 'auto',
+    // ==========================================
+    // 🌟 核心改进：自适应 Agent 思考与多轮工具调用循环
+    // ==========================================
+    console.log('[Agent Loop] 🚀 启动自适应 Agent 思考循环...');
+    let keepRunning = true;
+    let iteration = 0;
+    const maxIterations = 5; // 防御性阈值：最多允许连续执行 5 轮工具，防止死循环刷爆 Token
+
+    while (keepRunning && iteration < maxIterations) {
+      iteration++;
+      console.log(`[Agent Loop] 🤖 正在进行第 ${iteration} 轮思考...`);
+
+      // 请求大模型，注意：每一轮都要把当前最新的 messages 上下文（含上一轮的工具结果）和 finalTools 喂给它
+      const aiData = await callAiRaw(messages, {
         temperature: 0.2,
         max_tokens: 1200,
-      })
+        // 🌟 完美适配 exactOptionalPropertyTypes: true 的优雅写法
+        ...(finalTools.length > 0 ? { tools: finalTools, tool_choice: 'auto' as 'auto' } : {})
+      });
 
-      const assistantMessage = firstData.choices?.[0]?.message
-      const toolCalls = assistantMessage?.tool_calls || []
+      const assistantMessage = aiData.choices?.[0]?.message;
+      const toolCalls = assistantMessage?.tool_calls || [];
+      const content = assistantMessage?.content || '';
 
-      if (!toolCalls.length) {
-        finalContent = assistantMessage?.content || '我没有调用工具，直接完成回答。'
-        sendSSE(res, 'final', {
-          content: finalContent,
-        })
-
-        // 写入缓存，无工具调用
-        aiCache.set(cacheKey, { toolCalls: [], toolResults: [], finalText: finalContent })
-
-        sendSSE(res, 'done', {})
-        return res.end()
-      }
-
+      // 无论大模型这一轮是想调用工具，还是想说话，都必须把它的回复先塞进 messages 上下文
       messages.push({
         role: 'assistant',
-        content: assistantMessage?.content || '',
-        tool_calls: toolCalls,
-      })
+        content: content,
+        tool_calls: toolCalls.length ? toolCalls : undefined,
+      });
 
-      // 对于每个用到的工具
+      // 💡 退出条件 1：大模型这一轮没有返回任何 tool_calls，说明它的目的已经达到（工具已经用够了，给出了最终总结）
+      if (!toolCalls.length) {
+        finalContent = content || '任务已全部完成。';
+        keepRunning = false;
+        break;
+      }
+
+      // 逐个执行本轮大模型点名要调用的工具
       for (const toolCall of toolCalls) {
-        const toolName = toolCall.function.name
-        const args = JSON.parse(toolCall.function.arguments || '{}')
+        const toolName = toolCall.function.name;
+        const args = JSON.parse(toolCall.function.arguments || '{}');
 
+        // 发送给前端，告诉前端我们要调用哪个工具
         sendSSE(res, 'tool_call', {
           id: toolCall.id,
           name: toolName,
           arguments: args,
-        })
+        });
         executedToolCalls.push({
           id: toolCall.id,
           name: toolName,
           arguments: args,
-        })
+        });
 
-        const start = Date.now()
+        const start = Date.now();
+        let result: any;
 
-        const context: AgentContext = {
-          currentFiles,
-          reactCode,
-          selectedCode,
-          image,
+        // 工具路由分流：MCP 工具 VS 内置业务工具
+        if (toolName.startsWith('mcp__')) {
+          try {
+            const [, serverName, rawToolName] = toolName.split('__');
+            console.log(`[MCP Routing] 转发至 MCP 服务 [${serverName}] 执行工具 [${rawToolName}]`);
+            
+            const mcpRawResult = await mcpManager.callTool(serverName, rawToolName, args);
+            result = {
+              isMcp: true,
+              serverName,
+              toolName: rawToolName,
+              ...mcpRawResult
+            };
+          } catch (err: any) {
+            result = { error: true, message: `MCP 执行失败: ${err.message}` };
+          }
+        } else {
+          const context: AgentContext = { currentFiles, reactCode, selectedCode, image };
+          result = await runToolByName(toolName, args, context);
         }
 
-        const result = await runToolByName(toolName, args, context)
+        const elapsedMs = Date.now() - start;
 
-        const elapsedMs = Date.now() - start
-
+        // 将工具执行完毕的结果推给前端
         sendSSE(res, 'tool_result', {
           id: toolCall.id,
           name: toolName,
           result,
           elapsedMs,
-        })
-
+        });
         executedToolResults.push({
           id: toolCall.id,
           name: toolName,
           result,
           elapsedMs,
-        })
+        });
 
+        // 🌟 关键的一步：将工具执行的结果转换成 'tool' 角色，回填进上下文，大模型在下一轮循环里就能基于这个数据继续思考！
         messages.push({
           role: 'tool',
           tool_call_id: toolCall.id,
           name: toolName,
           content: JSON.stringify(result),
-        })
+        });
       }
 
-      // 所有工具执行完后，统一生成最终回复
-      sendSSE(res, 'stage', { text: '工具执行完成，正在生成最终回复...' })
-
-      // image_to_code 结果不需要 DeepSeek 二次总结，直接告知用户
-      const hasImageToCode = toolCalls.some((t: ToolCall) => t.function.name === 'image_to_code')
-
+      // 💡 退出条件 2：特定业务拦截（保留你原有的 image_to_code 直接截断逻辑）
+      const hasImageToCode = toolCalls.some((t: any) => t.function.name === 'image_to_code');
       if (hasImageToCode) {
-        finalContent = '已根据图片生成代码，请确认是否应用。'
-        sendSSE(res, 'final', { content:  finalContent})
-      } else {
-        const secondData = await callAiRaw(messages, {
-          temperature: 0.3,
-          max_tokens: 800,
-        })
-        finalContent =
-          secondData.choices?.[0]?.message?.content ||
-          '已完成，结果已进入 Diff 确认流程。'
-        sendSSE(res, 'final', { content: finalContent })
+        finalContent = '已根据图片生成代码，请确认是否应用。';
+        keepRunning = false;
+        break;
       }
 
-      aiCache.set(cacheKey, {toolCalls:executedToolCalls, toolResults:executedToolResults, finalContent})
+      sendSSE(res, 'stage', { text: `第 ${iteration} 轮工具执行完成，正在交回给 AI 进行下一步研判...` });
+    }
 
-      sendSSE(res, 'done', {})
-      res.end()
+    // ==========================================
+    // 统一发送最终文本回复，并进行全局缓存写入
+    // ==========================================
+    sendSSE(res, 'final', { content: finalContent });
+    
+    // 写入缓存（注意：这里统一使用 finalContent，修复了你原代码中 key 名写错成 finalText 的隐蔽 bug）
+    aiCache.set(cacheKey, { 
+      toolCalls: executedToolCalls, 
+      toolResults: executedToolResults, 
+      finalContent 
+    });
 
-  }catch(error: any){
+    sendSSE(res, 'done', {});
+    res.end();
+
+  } catch (error: any) {
     sendSSE(res, 'error', {
       message: error?.message || 'Agent 执行失败',
     })
-
     res.end()
   }
 })
-
 export default router
